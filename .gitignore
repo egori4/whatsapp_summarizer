@@ -1,0 +1,22 @@
+# Disposable exact-commit Hermes checkout used only to generate offline evidence.
+spike/hermes/
+spike/apply-check/
+.scratch/
+
+# Python bytecode is generated locally and is not spike evidence.
+__pycache__/
+*.py[cod]
+
+# Protected, host-specific G2b policy and local WhatsApp group directory.
+# They pin group metadata and runtime; retain locally at mode 0600 and never commit.
+config/digest.policy.json
+config/whatsapp-group-directory.json
+
+# Local pre-change rollback records and raw replay inputs stay owner-only.
+.runtime-backups/
+.runtime-imports/
+
+# Runtime state and local operator evidence are never publication artifacts.
+data*/
+run.lock
+HANDOFF.private.md

@@ -1,0 +1,16 @@
+name: whatsapp_tech_digest_collector
+version: 1.0.0
+manifest_version: 2
+api_version: 1
+description: "Collector-only intake for the policy-pinned WhatsApp Tech Digest group."
+provides_hooks:
+  - pre_gateway_dispatch
+config_schema:
+  project_root:
+    type: str
+    required: true
+    description: "Trusted absolute path of the WhatsApp Tech Digest project."
+  policy_path:
+    type: str
+    required: true
+    description: "Owner-only absolute path to the protected digest policy JSON."

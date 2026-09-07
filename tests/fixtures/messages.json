@@ -1,0 +1,5 @@
+[
+  {"chat_jid": "10000000-00000002@g.us", "message_id": "a", "participant": "15551234567@s.whatsapp.net", "timestamp": "2026-09-01T12:00:00+00:00", "text": "CVE-2026-1234 affects our edge deployment."},
+  {"chat_jid": "10000000-00000002@g.us", "message_id": "b", "participant": "15557654321@s.whatsapp.net", "timestamp": "2026-09-01T12:05:00+00:00", "text": "The mitigation is to update the WAF signature."},
+  {"chat_jid": "10000000-00000002@g.us", "message_id": "c", "participant": "15551234567@s.whatsapp.net", "timestamp": "2026-09-01T12:10:00+00:00", "text": "CVE-2026-1234 affects our edge deployment."}
+]
