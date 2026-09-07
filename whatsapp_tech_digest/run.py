@@ -120,11 +120,15 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
             )
         raise DeliveryBlockedError("durable omissions must be explicitly reconciled before model processing or SMTP")
     spool.require_current(events)
-    normalized = stage_zero(events, config.models.batch_size)
+    normalized = stage_zero(events)
     if execution_mode == "validate-only":
         return ""
     if config.models.pipeline_mode == "one_pass":
-        selected, degraded = normalized, False
+        selected = [
+            item for item in normalized
+            if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")
+        ]
+        degraded = False
     else:
         selected, degraded = high_recall_select(
             normalized,

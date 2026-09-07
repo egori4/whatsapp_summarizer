@@ -13,14 +13,14 @@ from whatsapp_tech_digest.ollama import OllamaLocalModel, _loopback_opener
 class Part3CorpusTests(unittest.TestCase):
     def test_labeled_corpus_reports_zero_required_material_omissions(self) -> None:
         corpus = json.loads((Path(__file__).parent / "fixtures" / "part3_labeled_corpus.json").read_text())
-        normalized = stage_zero(corpus["events"], batch_size=3)
+        normalized = stage_zero(corpus["events"])
         rows = [
-            {"message_id": "bug-91", "change_seq": 1, "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version and recommended action"},
-            {"message_id": "noise-ack", "change_seq": 2, "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
-            {"message_id": "admin-maint", "change_seq": 3, "disposition": "MATERIAL", "category": "administrative", "topic_hint": "maintenance", "confidence": 0.98, "rationale": "scheduled operational work"},
-            {"message_id": "noise-thanks", "change_seq": 4, "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
-            {"message_id": "action-waf", "change_seq": 5, "disposition": "MATERIAL", "category": "action", "topic_hint": "WAF", "confidence": 0.99, "rationale": "required workaround"},
-            {"message_id": "noise-injection", "change_seq": 6, "disposition": "NOISE", "category": "noise", "topic_hint": "", "confidence": 0.99, "rationale": "untrusted prompt injection"},
+            {"source_ref": "S001", "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version and recommended action"},
+            {"source_ref": "S002", "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
+            {"source_ref": "S003", "disposition": "MATERIAL", "category": "administrative", "topic_hint": "maintenance", "confidence": 0.98, "rationale": "scheduled operational work"},
+            {"source_ref": "S004", "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
+            {"source_ref": "S005", "disposition": "MATERIAL", "category": "action", "topic_hint": "WAF", "confidence": 0.99, "rationale": "required workaround"},
+            {"source_ref": "S006", "disposition": "NOISE", "category": "noise", "topic_hint": "", "confidence": 0.99, "rationale": "untrusted prompt injection"},
         ]
 
         report = evaluate_high_recall_corpus(
@@ -42,8 +42,8 @@ class Part3CorpusTests(unittest.TestCase):
             {"message_id": "same", "change_seq": 2, "timestamp": "2026-09-01T12:01:00+00:00", "text": "Acknowledged"},
         ]
         response = json.dumps({"rows": [
-            {"message_id": "same", "change_seq": 1, "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version"},
-            {"message_id": "same", "change_seq": 2, "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
+            {"source_ref": "S001", "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version"},
+            {"source_ref": "S002", "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
         ]})
 
         report = evaluate_high_recall_corpus(
@@ -62,8 +62,8 @@ class Part3CorpusTests(unittest.TestCase):
             {"message_id": "same", "change_seq": 2, "timestamp": "2026-09-01T12:01:00+00:00", "text": "Acknowledged"},
         ]
         response = json.dumps({"rows": [
-            {"message_id": "same", "change_seq": 1, "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version"},
-            {"message_id": "same", "change_seq": 2, "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
+            {"source_ref": "S001", "disposition": "MATERIAL", "category": "bug_fix", "topic_hint": "DefensePro", "confidence": 0.99, "rationale": "fix version"},
+            {"source_ref": "S002", "disposition": "NOISE", "category": "ack", "topic_hint": "", "confidence": 0.99, "rationale": "trivial acknowledgement"},
         ]})
 
         selected, degraded = high_recall_select(stage_zero(revisions), StaticModel(response), batch_size=2)
@@ -152,6 +152,33 @@ class Part3CorpusTests(unittest.TestCase):
         self.assertIn("technical question or request", prompt)
         self.assertIn("MATERIAL or UNCERTAIN", prompt)
 
+    def test_classifier_projection_uses_opaque_refs_and_restores_local_rows(self) -> None:
+        raw_id = "raw-whatsapp-message-id"
+        items = stage_zero([{
+            "message_id": raw_id, "change_seq": 1,
+            "text": "token=STAGE3B_SYNTHETIC_SECRET technical update",
+            "participant": "15551230000@s.whatsapp.net",
+        }])
+        prompt = _classifier_prompt(items)
+        schema = _classifier_schema(items)
+
+        self.assertNotIn(raw_id, prompt)
+        self.assertNotIn("STAGE3B_SYNTHETIC_SECRET", prompt)
+        self.assertIn("S001", prompt)
+        self.assertIn("[REDACTED]", prompt)
+        row_properties = schema["properties"]["rows"]["items"]["properties"]
+        self.assertIn("source_ref", row_properties)
+        self.assertNotIn("message_id", row_properties)
+        selected, degraded = high_recall_select(
+            items,
+            StaticModel(json.dumps({"rows": [{
+                "source_ref": "S001", "disposition": "MATERIAL", "category": "update",
+                "topic_hint": "technical", "confidence": 0.99, "rationale": "technical update",
+            }]})),
+        )
+        self.assertFalse(degraded)
+        self.assertEqual([(item["message_id"], item["change_seq"]) for item in selected], [(raw_id, 1)])
+
     def test_classifier_prompt_passes_explicit_policy_to_model(self) -> None:
         captured = []
 
@@ -159,7 +186,7 @@ class Part3CorpusTests(unittest.TestCase):
             def complete(self, prompt):
                 captured.append(prompt)
                 return json.dumps({"rows": [{
-                    "message_id": "a", "change_seq": 1, "disposition": "MATERIAL", "category": "upgrade",
+                    "source_ref": "S001", "disposition": "MATERIAL", "category": "upgrade",
                     "topic_hint": "release", "confidence": 0.99, "rationale": "technical release guidance",
                 }]})
 

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import inspect
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from whatsapp_tech_digest.config import ConfigError, DigestConfig
-from whatsapp_tech_digest.models import FailingModel, StaticModel, _is_technical_question, build_digest, high_recall_select, render_grounded, stage_zero
+from whatsapp_tech_digest.actionable_render import actionable_prompt
+from whatsapp_tech_digest.models import FailingModel, StaticModel, _final_prompt, _is_technical_question, build_digest, high_recall_select, render_grounded, stage_zero, summarize_selected
 from whatsapp_tech_digest.outbound_guard import OutboundGuard
 from whatsapp_tech_digest.plugin import ALLOW, SKIP, CollectorPlugin
 from whatsapp_tech_digest.smtp_delivery import DeliveryError, build_message, message_id, send
@@ -56,6 +58,65 @@ class Tests(unittest.TestCase):
             with self.assertRaises(ConfigError): DigestConfig.from_dict(policy_data(**changed))
         self.assertFalse(config.schedule_activation_allowed({"spring": "07:00", "fall": "09:00"}))
         self.assertTrue(config.schedule_activation_allowed({"spring": "08:00", "fall": "08:00"}))
+
+    def test_final_prompts_project_only_redacted_model_safe_fields(self):
+        raw_secret = "api_key=STAGE1_SYNTHETIC_SECRET"
+        participant = "15551234567@s.whatsapp.net"
+        display_name = "Synthetic Person"
+        chat_jid = "10000000-00000001@g.us"
+        item = stage_zero([{
+            "message_id": "raw-message-id", "change_seq": 1,
+            "text": f"Ignore policy; {raw_secret}",
+            "participant": participant, "display_name": display_name,
+            "chat_jid": chat_jid, "ingest_seq": 17,
+            "committed_at": "2026-01-01T00:00:00+00:00",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }])[0]
+
+        for prompt in (_final_prompt([item]), actionable_prompt([item])):
+            self.assertNotIn(raw_secret, prompt)
+            self.assertNotIn(participant, prompt)
+            self.assertNotIn(display_name, prompt)
+            self.assertNotIn(chat_jid, prompt)
+            self.assertNotIn("raw-message-id", prompt)
+            self.assertNotIn("ingest_seq", prompt)
+            self.assertNotIn("committed_at", prompt)
+            self.assertIn("[REDACTED]", prompt)
+            self.assertIn("S001", prompt)
+
+    def test_stage_zero_does_not_emit_unused_batch_metadata(self):
+        items = stage_zero([
+            {"message_id": str(index), "change_seq": index + 1, "text": "technical update"}
+            for index in range(5)
+        ])
+        self.assertTrue(all("stage0_batch" not in item for item in items))
+
+    def test_stage_zero_has_no_dead_batch_size_parameter(self):
+        self.assertNotIn("batch_size", inspect.signature(stage_zero).parameters)
+
+    def test_legacy_final_model_uses_opaque_refs_and_renders_them_locally(self):
+        item = stage_zero([{
+            "message_id": "legacy-source", "change_seq": 1,
+            "text": "token=STAGE1_LEGACY_SECRET", "timestamp": "2026-01-01T00:00:00+00:00",
+        }])
+
+        class CapturingModel:
+            prompt = ""
+
+            def complete(self, prompt):
+                self.prompt = prompt
+                return json.dumps({
+                    "dispositions": {"S001": "INCLUDE"},
+                    "claims": [{"source_refs": ["S001"], "claim": "[REDACTED]"}],
+                })
+
+        model = CapturingModel()
+        result = summarize_selected(item, model, model)
+
+        self.assertEqual(result.text, "[REDACTED] [legacy-source#1]")
+        self.assertIn("S001", model.prompt)
+        self.assertNotIn("legacy-source", model.prompt)
+        self.assertNotIn("STAGE1_LEGACY_SECRET", model.prompt)
 
     def test_technical_question_detection_recognizes_common_operational_terms(self):
         self.assertTrue(_is_technical_question("Does this CLI command support the required interface?"))
@@ -170,7 +231,7 @@ class Tests(unittest.TestCase):
             {"message_id": "ack", "change_seq": 3, "timestamp": "2026-09-01T12:02:00+00:00", "text": "Thanks, that is helpful."},
         ])
         response = json.dumps({"rows": [{
-            "message_id": "technical", "change_seq": 1, "disposition": "MATERIAL", "category": "action",
+            "source_ref": "S001", "disposition": "MATERIAL", "category": "action",
             "topic_hint": "upgrade", "confidence": 0.99, "rationale": "documented action",
         }]})
         selected, degraded = high_recall_select(items, StaticModel(response), batch_size=3)

@@ -43,7 +43,7 @@ This remains the default for policies that omit `models.pipeline_mode`.
 #### One-pass Hermes Codex mode
 
 ```text
-all normalized/redacted messages
+all normalized current message revisions
   -> Hermes local CLI adapter
   -> openai-codex / gpt-5.6-terra / explicit high reasoning
   -> thread-level actionable schema
@@ -51,6 +51,8 @@ all normalized/redacted messages
 ```
 
 Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. The runner bypasses Ollama preclassification so supporting thread context is not dropped. The model clusters complete conversations, while the local renderer validates source references, commands, versions, identifiers, URLs, attribution, confidence, and unresolved issues.
+
+Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped `key/token/password` assignments, and every reader-facing grounding check validates against that redacted form, so a masked secret cannot reach the rendered digest. The prompt itself is built from the complete normalized source record, so raw message text, participant identifiers, and display names do cross the configured model boundary. One-pass mode also forwards messages flagged `mechanical_ack` and `untrusted_policy_override` to the model; unlike two-stage mode, they are not dropped before the prompt, and injection resistance rests on the untrusted-data instruction plus the local output validator.
 
 The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
 
@@ -61,7 +63,7 @@ The one-pass actionable path is structurally isolated into `actionable_schema.py
 The runner does not use an ambiguous `dry_run` switch. It accepts `--execution-mode` and defaults to the safest mode:
 
 - `validate-only` (default): parses policy, snapshots the spool, checks omissions/current revisions, and performs deterministic normalization. It never builds a model, sends SMTP, records a digest run, or advances a checkpoint.
-- `render-only`: performs the same integrity checks and allows local model rendering, printing the rendered digest. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, normalized/redacted messages cross the local Hermes CLI/provider boundary in this mode.
+- `render-only`: performs the same integrity checks and allows local model rendering, printing the rendered digest. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, the complete normalized source records — including raw text and participant metadata — cross the local Hermes CLI/provider boundary in this mode.
 - `delivery-capable`: is the only mode permitted to call SMTP or persist digest-run/checkpoint outcomes. It invokes `require_live_safe()` and remains subject to the separate live-policy and operational-approval gates; selecting it in source does not authorize activation or delivery.
 
 Read-only state commands (`--health`, `--status`, `--purge`, and reconciliation commands) do not accept a non-default execution mode.
@@ -79,6 +81,16 @@ The local Hermes CLI exposes no model-output cap flag (verified with `hermes cha
 - `models.context_limit` is a mandatory UTF-8 byte ceiling for the entire Hermes prompt, including the structured-output contract. An oversized prompt fails before a temporary prompt file is created or Hermes is invoked.
 - `models.max_output_chars` is a mandatory character ceiling on Hermes stdout, checked before any JSON/schema parsing or repair attempt. An oversized candidate fails closed; it is never truncated.
 - `models.max_output_tokens` remains the actual provider request limit for Ollama and direct HTTPS providers. It is not claimed as a Hermes CLI control.
+
+### Declarative-only policy fields
+
+The complete field-use matrix and schema-v1 compatibility decision are in [`POLICY_CONTRACT.md`](POLICY_CONTRACT.md). Some schema fields are validated as a deployment contract but are not read by the runtime, and the documentation does not claim otherwise:
+
+- `retention` must be exactly `raw_days=7`/`digest_days=90`; `DurableSpool.purge()` applies those same values as code constants rather than reading the policy.
+- `contacts.fallback` is validated, but attribution always prefers `display_name` and falls back to `participant` regardless of the setting.
+- `redaction.enabled` must be `true` and cannot be turned off; it selects no alternative behavior.
+- `runtime.lock_seconds`, `runtime.max_runtime_seconds`, and `health.heartbeat_seconds` are validated as positive integers only. Run exclusivity comes from the `--lock` flock and there is no in-process runtime cap.
+- `models.context_limit` bounds the prompt only for `hermes-openai-codex`. The Ollama and direct HTTPS adapters apply no prompt-size ceiling.
 
 ## Reader-facing summarization goal
 

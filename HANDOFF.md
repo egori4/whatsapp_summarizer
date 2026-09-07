@@ -20,6 +20,13 @@ Not present in Git:
 - The runner defaults to `validate-only`; rendering, reviewed-artifact delivery, service restart, and scheduling remain separate operator approvals.
 - SMTP delivery must use the fixed recipient declared in the protected local policy. The published code deliberately contains no recipient identity or credentials.
 
+## Current source hardening
+
+- Every model prompt builder, including the two-stage classifier, uses an explicit allowlisted projection: opaque source refs and redacted text, plus optional timestamps and opaque reply linkage only where the final model needs them. Raw message IDs, participant/display metadata, chat identifiers, and spool/runtime metadata remain local.
+- One-pass generation applies the same local acknowledgement and untrusted-policy-override exclusion as the two-stage path before constructing a final-model prompt.
+- Actionable topics own their declared `source_refs`; locally derived attribution is not model-supplied, dependent references cannot silently enlarge ownership, duplicate specifics are rejected, and topic/unanswered source reuse is rejected.
+- [`POLICY_CONTRACT.md`](POLICY_CONTRACT.md) records the schema-v1 field-use matrix and distinguishes runtime controls from fixed or compatibility declarations.
+
 ## Publication-safe setup
 
 1. Copy `config/digest.policy.example.json` to the ignored `config/digest.policy.json`.

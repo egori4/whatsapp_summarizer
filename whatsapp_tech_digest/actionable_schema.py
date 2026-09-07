@@ -18,24 +18,21 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     topic = {
         "type": "object", "additionalProperties": False,
         "required": [
-            "topic", "title", "source_refs", "raw_keep_refs", "reason_kept",
+            "topic", "title", "source_refs", "raw_keep_refs",
             "question", "situation", "recommendation", "specifics", "limitation",
-            "reference_refs", "question_refs", "contributor_refs", "confidence",
+            "reference_refs", "confidence",
         ],
         "properties": {
             "topic": {"type": "string", "minLength": 1, "maxLength": 80},
             "title": {"type": "string", "minLength": 1, "maxLength": 100},
             "source_refs": required_ref_array,
             "raw_keep_refs": required_ref_array,
-            "reason_kept": {"type": "string", "minLength": 1, "maxLength": 220},
             "question": {"type": "string", "minLength": 1, "maxLength": 240},
             "situation": {"type": "string", "maxLength": 600},
             "recommendation": {"type": "string", "maxLength": 600},
             "specifics": {"type": "array", "items": specific, "uniqueItems": True},
             "limitation": {"type": "string", "maxLength": 600},
             "reference_refs": ref_array,
-            "question_refs": ref_array,
-            "contributor_refs": ref_array,
             "confidence": {"type": "string", "enum": ["documented", "confirmed", "field_guidance"]},
         },
     }

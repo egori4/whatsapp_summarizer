@@ -94,7 +94,6 @@ class ActionableDigestTests(unittest.TestCase):
                     "title": "Direct upgrade path",
                     "source_refs": [ref("upgrade-question", 1), ref("upgrade-answer", 2), ref("upgrade-kb", 3)],
                     "raw_keep_refs": [ref("upgrade-question", 1), ref("upgrade-answer", 2), ref("upgrade-kb", 3)],
-                    "reason_kept": "Provides a reusable version recommendation and failure signature.",
                     "question": "Can Controller KVM upgrade directly to 10.14.0 after intermediate-package failures?",
                     "situation": "Intermediate upgrades from 10.10.6 toward 10.14.0 can fail at 10.11.0 with package exit code 100.",
                     "recommendation": "Upgrade directly to 10.14.0.",
@@ -103,8 +102,6 @@ class ActionableDigestTests(unittest.TestCase):
                     ],
                     "limitation": "",
                     "reference_refs": [ref("upgrade-kb", 3)],
-                    "question_refs": [ref("upgrade-question", 1)],
-                    "contributor_refs": [ref("upgrade-answer", 2), ref("upgrade-kb", 3)],
                     "confidence": "field_guidance",
                 },
                 {
@@ -112,7 +109,6 @@ class ActionableDigestTests(unittest.TestCase):
                     "title": "Stale ARP checks",
                     "source_refs": [ref("mac-question", 4), ref("correction", 6), ref("commands", 7)],
                     "raw_keep_refs": [ref("commands", 7)],
-                    "reason_kept": "Preserves reusable inspection and remediation commands.",
                     "question": "How should stale ARP be checked after an appliance replacement?",
                     "situation": "Use these checks when stale ARP is suspected after appliance replacement.",
                     "recommendation": "Inspect ARP state and send a gratuitous ARP for the affected IP.",
@@ -122,8 +118,6 @@ class ActionableDigestTests(unittest.TestCase):
                     ],
                     "limitation": "The Monitoring suggestion was not confirmed by the requester.",
                     "reference_refs": [],
-                    "question_refs": [ref("mac-question", 4)],
-                    "contributor_refs": [ref("commands", 7)],
                     "confidence": "field_guidance",
                 },
             ],
@@ -137,6 +131,29 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertEqual(render_actionable(response, sources), extracted_render_actionable(response, sources))
         self.assertEqual(set(actionable_source_map(sources)), set(self.response()["dispositions"]))
         self.assertEqual(actionable_schema(sources)["required"], ["dispositions", "topics", "unanswered"])
+
+    def test_actionable_schema_does_not_request_locally_derived_attribution_fields(self):
+        required = actionable_schema(self.sources())["properties"]["topics"]["items"]["required"]
+        self.assertNotIn("reason_kept", required)
+        self.assertNotIn("question_refs", required)
+        self.assertNotIn("contributor_refs", required)
+
+    def test_unanswered_cannot_reuse_a_source_assigned_to_a_topic(self):
+        response = self.response()
+        response["unanswered"] = [{
+            "topic": "Duplicate question",
+            "question_source_ref": "S001",
+            "context_refs": [],
+            "reason": "The topic source is already represented above.",
+        }]
+        with self.assertRaisesRegex(ModelFailure, "source belongs to multiple topics"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_actionable_topic_rejects_duplicate_specifics(self):
+        response = self.response()
+        response["topics"][0]["specifics"].append({"source_ref": "S002", "value": "10.14.0"})
+        with self.assertRaisesRegex(ModelFailure, "duplicate specifics"):
+            render_actionable(json.dumps(response), self.sources())
 
     def test_validated_actionable_result_carries_revision_only_provenance(self):
         result = summarize_actionable(self.sources(), StaticModel(json.dumps(self.response())), StaticModel(json.dumps(self.response())))
@@ -212,11 +229,10 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Physical interfaces", "title": "Behavior confirmation",
                 "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
-                "reason_kept": "Captures reusable interface behavior.",
                 "question": "Does the behavior also apply to physical interfaces?",
                 "situation": "", "recommendation": "Apply the same behavior to physical interfaces.",
                 "specifics": [], "limitation": "",
-                "reference_refs": [], "question_refs": ["S001"], "contributor_refs": ["S002"],
+                "reference_refs": [],
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -234,12 +250,10 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Alteon replacement", "title": "Stale ARP recovery",
                 "source_refs": ["S001", "S002", "S003"], "raw_keep_refs": ["S003"],
-                "reason_kept": "Preserves reusable ARP remediation.",
                 "question": "Can stale ARP prevent VIPs from working after an Alteon replacement?",
                 "situation": "VIPs can fail after appliance replacement because of stale ARP entries.",
                 "recommendation": "Inspect ARP and send GARP for the affected IP.",
-                "specifics": [], "limitation": "", "reference_refs": [],
-                "question_refs": [], "contributor_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -249,7 +263,7 @@ class ActionableDigestTests(unittest.TestCase):
         )
         self.assertNotIn("Question asked: How can I check the physical-port MAC address", rendered)
 
-    def test_unanswered_topic_may_reuse_context_from_a_retained_thread(self):
+    def test_unanswered_topic_uses_sources_not_assigned_to_a_retained_thread(self):
         sources = [
             {"message_id": "tool", "change_seq": 1, "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00", "text": "Use migration tool https://code.example.invalid/migrate."},
             {"message_id": "gap", "change_seq": 2, "display_name": "Engineer B", "timestamp": "2026-09-01T13:01:00+00:00", "text": "How can we migrate historical traffic statistics?"},
@@ -258,17 +272,15 @@ class ActionableDigestTests(unittest.TestCase):
             "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
             "topics": [{
                 "topic": "Migration utility", "title": "Configuration migration",
-                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S001"],
-                "reason_kept": "Provides a reusable migration utility.",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
                 "question": "Which tool migrates configuration?",
                 "situation": "", "recommendation": "Use the migration tool.",
                 "specifics": [{"source_ref": "S001", "value": "migration tool"}],
-                "limitation": "", "reference_refs": ["S001"], "question_refs": [],
-                "contributor_refs": ["S001"], "confidence": "documented",
+                "limitation": "", "reference_refs": ["S001"], "confidence": "documented",
             }],
             "unanswered": [{
                 "topic": "Historical traffic migration", "question_source_ref": "S002",
-                "context_refs": ["S001"], "reason": "No reusable answer was established.",
+                "context_refs": [], "reason": "No reusable answer was established.",
             }],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -277,31 +289,33 @@ class ActionableDigestTests(unittest.TestCase):
 
     def test_unanswered_may_be_a_technical_issue_statement_without_question_form(self):
         sources = [{
-            "message_id": "issue", "change_seq": 1, "display_name": "Engineer A",
+            "message_id": "topic", "change_seq": 1, "display_name": "Engineer A",
             "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Document packet-reporting configuration before investigating protocol gaps.",
+        }, {
+            "message_id": "issue", "change_seq": 2, "display_name": "Engineer B",
+            "timestamp": "2026-09-01T13:01:00+00:00",
             "text": "Packet reporting differs between IPv4 and IPv6 after the policy change.",
         }]
         response = {
-            "dispositions": {"S001": "INCLUDE"},
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
             "topics": [{
                 "topic": "Packet reporting", "title": "Protocol behavior gap",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "reason_kept": "The unresolved behavior may affect future troubleshooting.",
-                "question": "Why does packet reporting differ between IPv4 and IPv6?",
-                "situation": "Packet reporting differs between IPv4 and IPv6 after the policy change.",
-                "recommendation": "Treat the behavior as unresolved.", "specifics": [],
-                "limitation": "No reusable conclusion was established.", "reference_refs": [],
-                "question_refs": [], "contributor_refs": [], "confidence": "field_guidance",
+                "question": "Which packet-reporting configuration should be documented?",
+                "situation": "Document packet-reporting configuration before investigating protocol gaps.",
+                "recommendation": "Document packet-reporting configuration.", "specifics": [],
+                "limitation": "", "reference_refs": [], "confidence": "field_guidance",
             }],
             "unanswered": [{
-                "topic": "Packet reporting", "question_source_ref": "S001", "context_refs": [],
+                "topic": "Packet reporting", "question_source_ref": "S002", "context_refs": [],
                 "reason": "No reusable conclusion was established.",
             }],
         }
         rendered = render_actionable(json.dumps(response), sources)
         self.assertIn("Question / unresolved issue: Packet reporting differs", rendered)
 
-    def test_attribution_is_derived_from_thread_when_model_refs_are_wrong(self):
+    def test_attribution_is_derived_from_thread_locally(self):
         sources = [
             {"message_id": "q", "change_seq": 1, "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00", "text": "Which command checks the interface state?"},
             {"message_id": "a", "change_seq": 2, "display_name": "Engineer B", "timestamp": "2026-09-01T13:01:00+00:00", "text": "Use /info/interface/dump."},
@@ -311,12 +325,10 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Interface state", "title": "Inspection command",
                 "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
-                "reason_kept": "Provides a reusable inspection command.",
                 "question": "Which command checks interface state?",
                 "situation": "", "recommendation": "Use /info/interface/dump.",
                 "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [],
-                "question_refs": ["S002"], "contributor_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -330,11 +342,12 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertIn("Commands: /info/l3/arp/dump; /oper/garp <ip_address>", rendered)
         self.assertNotIn("Run /info/l3/arp/dump now", rendered)
 
-    def test_specific_reference_is_canonicalized_into_its_topic(self):
+    def test_specific_reference_must_already_belong_to_its_topic(self):
         response = self.response()
         response["topics"][1]["source_refs"].remove("S007")
-        rendered = render_actionable(json.dumps(response), self.sources())
-        self.assertIn("/info/l3/arp/dump", rendered)
+        response["topics"][1]["raw_keep_refs"] = ["S004"]
+        with self.assertRaisesRegex(ModelFailure, "specific source ref is outside topic"):
+            render_actionable(json.dumps(response), self.sources())
 
     def test_exact_specific_phrase_is_reduced_to_its_protected_command(self):
         response = self.response()
