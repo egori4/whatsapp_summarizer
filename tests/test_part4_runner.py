@@ -136,7 +136,7 @@ class Part4RunnerTests(unittest.TestCase):
                             "topic": "Upgrade", "title": "Documented change",
                             "source_refs": ["S001", "S002"],
                             "raw_keep_refs": ["S001", "S002"],
-                            "question": "How should the configuration change be rolled back?",
+                            "question": "",
                             "situation": "", "recommendation": "Apply the documented upgrade.",
                             "specifics": [], "limitation": "The rollback note remains relevant.",
                             "reference_refs": [],

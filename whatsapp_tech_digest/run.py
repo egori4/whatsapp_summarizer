@@ -108,12 +108,14 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
     snapshot = spool.snapshot()
     events, run_type, omission = spool.pending_events(snapshot)
     if omission:
+        omission_checkpoint = spool.omission_prefix_checkpoint(snapshot)
         if execution_mode == "delivery-capable":
             spool.record_run(
                 snapshot,
                 run_type,
                 "failed",
                 omission_note=omission,
+                omission_checkpoint_seq=-1 if omission_checkpoint is None else omission_checkpoint,
                 source_count=len(events),
                 config_hash=_config_hash(policy_path),
                 coverage_snapshot=json.dumps(spool.coverage()),

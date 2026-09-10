@@ -92,7 +92,7 @@ class DurableSpool:
             CREATE TABLE IF NOT EXISTS digest_runs (
               digest_id TEXT PRIMARY KEY, checkpoint_seq INTEGER NOT NULL, cutoff_seq INTEGER NOT NULL,
               run_type TEXT NOT NULL, created_at TEXT NOT NULL, smtp_message_id TEXT, smtp_state TEXT NOT NULL,
-              output TEXT, omission_note TEXT, candidate_count INTEGER NOT NULL DEFAULT 0,
+              output TEXT, omission_note TEXT, omission_checkpoint_seq INTEGER, candidate_count INTEGER NOT NULL DEFAULT 0,
               source_count INTEGER NOT NULL DEFAULT 0, model_id TEXT, config_hash TEXT, content_hash TEXT,
               coverage_snapshot TEXT, checkpoint_decision TEXT NOT NULL DEFAULT 'retain',
               UNIQUE(checkpoint_seq, cutoff_seq)
@@ -109,6 +109,9 @@ class DurableSpool:
               provenance_json TEXT NOT NULL, provenance_hash TEXT NOT NULL
             );
         """)
+        digest_run_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(digest_runs)")}
+        if "omission_checkpoint_seq" not in digest_run_columns:
+            self.connection.execute("ALTER TABLE digest_runs ADD COLUMN omission_checkpoint_seq INTEGER")
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             pin = self.connection.execute("SELECT value FROM metadata WHERE key='target_group_jid'").fetchone()
@@ -236,6 +239,31 @@ class DurableSpool:
         run_type = "first-run" if checkpoint == 0 else ("catch-up" if omitted else "normal")
         note = f"{omitted} durable changes older than {horizon_hours}h omitted" if omitted else None
         return within, run_type, note
+
+    def omission_prefix_checkpoint(self, snapshot: Mapping[str, int], *, now: datetime | None = None) -> int | None:
+        """Return the safe omission prefix boundary, or None when old/fresh rows interleave."""
+        now = now or datetime.now(timezone.utc)
+        checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
+        rows = self.connection.execute("""
+            SELECT v.change_seq, v.committed_at
+              FROM messages m
+              JOIN message_versions v ON v.change_seq = (
+                  SELECT MAX(snapshot_version.change_seq)
+                    FROM message_versions snapshot_version
+                   WHERE snapshot_version.message_id = m.message_id
+                     AND snapshot_version.change_seq <= ?
+              )
+             WHERE v.change_seq > ? AND m.chat_jid=? AND v.tombstone=0
+             ORDER BY v.change_seq
+        """, (cutoff, checkpoint, self.target_group_jid)).fetchall()
+        horizon = now - timedelta(hours=24 if checkpoint == 0 else 72)
+        omitted = [int(row["change_seq"]) for row in rows if datetime.fromisoformat(row["committed_at"]) < horizon]
+        if not omitted:
+            return checkpoint
+        boundary = max(omitted)
+        if any(int(row["change_seq"]) <= boundary and datetime.fromisoformat(row["committed_at"]) >= horizon for row in rows):
+            return None
+        return boundary
 
     def require_current(self, events: Sequence[Mapping[str, Any]]) -> None:
         """Fail closed if a source changed after it was selected for processing."""
@@ -394,10 +422,14 @@ class DurableSpool:
             "provenance": provenance,
         }
 
-    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None) -> str:
+    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, omission_checkpoint_seq: int | None = None, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None) -> str:
         if smtp_state not in self._STATES:
             raise ValueError("invalid SMTP state")
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
+        if omission_checkpoint_seq is not None and not omission_note:
+            raise ValueError("an omission checkpoint requires an omission note")
+        if omission_checkpoint_seq is not None and omission_checkpoint_seq != -1 and not checkpoint <= omission_checkpoint_seq <= cutoff:
+            raise ValueError("omission checkpoint must remain within its snapshot")
         digest_id = self._digest_id(snapshot)
         content_hash = hashlib.sha256((output or "").encode()).hexdigest()
         if provenance is not None and (smtp_state not in {"accepted", "unknown"} or not output):
@@ -420,9 +452,9 @@ class DurableSpool:
             if existing and existing["smtp_state"] == "unknown" and smtp_state != "unknown":
                 raise DeliveryBlockedError("unknown delivery must use reconcile_delivery")
             if not existing:
-                self.connection.execute("INSERT INTO digest_runs(digest_id,checkpoint_seq,cutoff_seq,run_type,created_at,smtp_message_id,smtp_state,output,omission_note,candidate_count,source_count,model_id,config_hash,content_hash,coverage_snapshot,checkpoint_decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (digest_id, checkpoint, cutoff, run_type, self._now(), message_id, smtp_state, output, omission_note, candidate_count, source_count, model_id, config_hash, content_hash, coverage_snapshot, "advance" if smtp_state in self._TERMINAL else "retain"))
+                self.connection.execute("INSERT INTO digest_runs(digest_id,checkpoint_seq,cutoff_seq,run_type,created_at,smtp_message_id,smtp_state,output,omission_note,omission_checkpoint_seq,candidate_count,source_count,model_id,config_hash,content_hash,coverage_snapshot,checkpoint_decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (digest_id, checkpoint, cutoff, run_type, self._now(), message_id, smtp_state, output, omission_note, omission_checkpoint_seq, candidate_count, source_count, model_id, config_hash, content_hash, coverage_snapshot, "advance" if smtp_state in self._TERMINAL else "retain"))
             else:
-                self.connection.execute("UPDATE digest_runs SET smtp_state=?,smtp_message_id=?,output=?,omission_note=?,candidate_count=?,source_count=?,model_id=?,config_hash=?,content_hash=?,coverage_snapshot=?,checkpoint_decision=? WHERE digest_id=?", (smtp_state, message_id, output, omission_note, candidate_count, source_count, model_id, config_hash, content_hash, coverage_snapshot, "advance" if smtp_state in self._TERMINAL else "retain", digest_id))
+                self.connection.execute("UPDATE digest_runs SET smtp_state=?,smtp_message_id=?,output=?,omission_note=?,omission_checkpoint_seq=?,candidate_count=?,source_count=?,model_id=?,config_hash=?,content_hash=?,coverage_snapshot=?,checkpoint_decision=? WHERE digest_id=?", (smtp_state, message_id, output, omission_note, omission_checkpoint_seq, candidate_count, source_count, model_id, config_hash, content_hash, coverage_snapshot, "advance" if smtp_state in self._TERMINAL else "retain", digest_id))
             if provenance_row is not None:
                 schema_version, provenance_json, provenance_hash = provenance_row
                 self.connection.execute(
@@ -472,9 +504,16 @@ class DurableSpool:
                 raise DeliveryBlockedError("only a failed omission run can be acknowledged")
             if int(current["checkpoint_seq"]) != int(run["checkpoint_seq"]) or current["delivery_state"] != "clear":
                 raise DeliveryBlockedError("checkpoint changed; omission acknowledgement is unsafe")
+            boundary = run["omission_checkpoint_seq"]
+            if boundary is None:
+                boundary = run["cutoff_seq"]
+            if int(boundary) == -1:
+                raise DeliveryBlockedError("omitted changes are not a contiguous prefix; acknowledgement would discard fresh sources")
+            if not int(run["checkpoint_seq"]) <= int(boundary) <= int(run["cutoff_seq"]):
+                raise DeliveryBlockedError("omission acknowledgement boundary is outside its snapshot")
             self.connection.execute(
                 "UPDATE checkpoints SET checkpoint_seq=?,delivery_state='clear',updated_at=? WHERE id=1",
-                (run["cutoff_seq"], self._now()),
+                (boundary, self._now()),
             )
             self.connection.execute(
                 "UPDATE digest_runs SET checkpoint_decision='operator-acknowledged-omission' WHERE digest_id=?",

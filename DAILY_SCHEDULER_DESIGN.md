@@ -2,7 +2,7 @@
 
 ## Status
 
-This is a staged design only. No systemd unit, Hermes cron job, timer, model run, SMTP send, or schedule activation has been created.
+This is a source-stage design. The repository contains systemd-unit builders and a tested owner-only credential bridge (`UNATTENDED_DELIVERY_STAGE.md`). Repository contents do not assert the current local systemd activation state; inspect the installed user units and timer directly before relying on a schedule.
 
 The staged production policy selects the dedicated owner-only state directory `data-production/`; its spool database must be created only by the collector after a separately approved activation restart. R3, R4, and R5 remain preserved test evidence and must never be selected by the production policy.
 

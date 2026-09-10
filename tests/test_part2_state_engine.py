@@ -179,6 +179,32 @@ class Part2StateEngineTests(unittest.TestCase):
         self.assertEqual(spool.snapshot()["checkpoint_seq"], 1)
         self.assertEqual(spool.run(digest_id)["checkpoint_decision"], "operator-acknowledged-omission")
 
+    def test_omission_acknowledgement_preserves_a_fresh_suffix_for_digesting(self) -> None:
+        spool = self.spool()
+        spool.append_message(event("old"))
+        spool.append_message(event("fresh"))
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(hours=25)).isoformat()
+        spool.connection.execute("UPDATE message_versions SET committed_at=? WHERE change_seq=1", (old,))
+        snapshot = spool.snapshot()
+        events, run_type, omission = spool.pending_events(snapshot, now=now)
+        self.assertEqual([item["message_id"] for item in events], ["fresh"])
+        self.assertEqual(run_type, "first-run")
+        self.assertIsNotNone(omission)
+        self.assertEqual(spool.omission_prefix_checkpoint(snapshot, now=now), 1)
+        digest_id = spool.record_run(
+            snapshot, run_type, "failed", omission_note=omission,
+            omission_checkpoint_seq=1,
+        )
+
+        spool.reconcile_omission(digest_id, confirmation="ACKNOWLEDGE_OMITTED_DURABLE_CHANGES")
+        remaining, remaining_run_type, remaining_omission = spool.pending_events(spool.snapshot(), now=now)
+
+        self.assertEqual(spool.snapshot()["checkpoint_seq"], 1)
+        self.assertEqual([item["message_id"] for item in remaining], ["fresh"])
+        self.assertEqual(remaining_run_type, "normal")
+        self.assertIsNone(remaining_omission)
+
     def test_revocation_only_snapshot_can_advance_without_exposing_revoked_content(self) -> None:
         spool = self.spool()
         spool.append_message(event("sensitive"))

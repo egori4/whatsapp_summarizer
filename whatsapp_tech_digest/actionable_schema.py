@@ -27,7 +27,7 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "title": {"type": "string", "minLength": 1, "maxLength": 100},
             "source_refs": required_ref_array,
             "raw_keep_refs": required_ref_array,
-            "question": {"type": "string", "minLength": 1, "maxLength": 240},
+            "question": {"type": "string", "maxLength": 240},
             "situation": {"type": "string", "maxLength": 600},
             "recommendation": {"type": "string", "maxLength": 600},
             "specifics": {"type": "array", "items": specific, "uniqueItems": True},

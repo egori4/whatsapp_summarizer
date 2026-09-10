@@ -15,6 +15,7 @@ _PROTECTED_FACT = re.compile(
     r"|\b\d{5,}\b"
 )
 _LOW_CONFIDENCE = re.compile(r"(?i)\b(?:i think|i believe|probably|if i recall|not sure|maybe)\b")
+_IDENTITY_LABEL = re.compile(r"^\+?\d[\d\s().-]{5,}$")
 
 
 def actionable_source_map(items: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -42,8 +43,13 @@ def clean_field(value: object, field: str, *, required: bool = False) -> str:
 def names(refs: Sequence[str], sources: Mapping[str, Mapping[str, Any]]) -> list[str]:
     names: list[str] = []
     for reference in refs:
-        name = str(sources[reference].get("display_name") or sources[reference].get("participant") or "unknown participant").strip()
-        if not name or "\n" in name:
+        raw_name = sources[reference].get("display_name")
+        if not isinstance(raw_name, str):
+            continue
+        name = raw_name.strip()
+        if not name or _IDENTITY_LABEL.fullmatch(name):
+            continue
+        if "\n" in name:
             raise ModelFailure("participant metadata invalid")
         if name not in names:
             names.append(name)

@@ -2,6 +2,8 @@
 spike/hermes/
 spike/apply-check/
 .scratch/
+.hermes/
+.venv/
 
 # Python bytecode is generated locally and is not spike evidence.
 __pycache__/

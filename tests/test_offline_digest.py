@@ -362,8 +362,15 @@ class Tests(unittest.TestCase):
 
     def test_smtp_fixed_utf8_deterministic_and_failure(self):
         policy = DigestConfig.from_dict(policy_data()).smtp
-        message = build_message(policy, "digest", "Résumé", "é")
+        body = "# Technical Updates\n\n## Regional Call Cancelled\n\n**Summary:** The call is cancelled.\n\n- Follow up on urgent findings."
+        message = build_message(policy, "digest", "Résumé", body)
         self.assertEqual(message["To"], "owner@example.invalid"); self.assertEqual(message["Message-ID"], message_id("digest"))
+        self.assertTrue(message.is_multipart())
+        html = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("<h1>Technical Updates</h1>", html)
+        self.assertIn("<h2>Regional Call Cancelled</h2>", html)
+        self.assertIn("<strong>Summary:</strong>", html)
+        self.assertIn("<ul>", html)
         with self.assertRaises(DeliveryError): send(policy, "digest", "subject", "body", smtp_factory=lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
 
     def test_smtp_fake_acceptance_uses_starttls_and_auth(self):

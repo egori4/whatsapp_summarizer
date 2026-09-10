@@ -14,6 +14,12 @@ Before publishing or deploying any change:
 - confirm no policy, group directory, spool, rendered artifact, log, credential, session, recipient identity, or local path is staged;
 - use only the sanitized nondeployable policy example in this repository.
 
+## Current Version-Controlled Change
+
+This revision adds source-level safeguards for an unattended, reviewed-artifact delivery stage: an owner-only SMTP credential bridge, hardened generated systemd unit definitions, and regression coverage for exact reviewed-artifact delivery. It also records the associated operational contract in `UNATTENDED_DELIVERY_STAGE.md`.
+
+These are inert source artifacts. They do not install or enable units, access credentials, run a model, send email, or activate a schedule. Production policy, runtime state, credentials, rendered artifacts, and activation evidence remain owner-only and Git-ignored.
+
 ## Data flow
 
 ```text

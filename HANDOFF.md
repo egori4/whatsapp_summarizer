@@ -25,6 +25,7 @@ Not present in Git:
 - Every model prompt builder, including the two-stage classifier, uses an explicit allowlisted projection: opaque source refs and redacted text, plus optional timestamps and opaque reply linkage only where the final model needs them. Raw message IDs, participant/display metadata, chat identifiers, and spool/runtime metadata remain local.
 - One-pass generation applies the same local acknowledgement and untrusted-policy-override exclusion as the two-stage path before constructing a final-model prompt.
 - Actionable topics own their declared `source_refs`; locally derived attribution is not model-supplied, dependent references cannot silently enlarge ownership, duplicate specifics are rejected, and topic/unanswered source reuse is rejected.
+- Sender attribution uses a bounded in-memory bridge contact-label cache fed by provider contact events. It prefers a human-readable contact/profile label, never falls back to a numeric participant identifier, and omits unavailable attribution; the model projection still excludes all participant metadata.
 - [`POLICY_CONTRACT.md`](POLICY_CONTRACT.md) records the schema-v1 field-use matrix and distinguishes runtime controls from fixed or compatibility declarations.
 
 ## Publication-safe setup

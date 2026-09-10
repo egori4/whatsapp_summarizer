@@ -46,7 +46,7 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
             raise ModelFailure("actionable topic schema drift")
         topic = clean_field(entry["topic"], "topic", required=True)
         title = clean_field(entry["title"], "title", required=True)
-        question = clean_field(entry["question"], "question", required=True)
+        question = clean_field(entry["question"], "question")
         situation = clean_field(entry["situation"], "situation")
         recommendation = clean_field(entry["recommendation"], "recommendation")
         limitation = clean_field(entry["limitation"], "limitation")
@@ -85,6 +85,8 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
         if not any((situation, recommendation, limitation, specifics, reference_refs)):
             raise ModelFailure("actionable topic has no reader-facing technical content")
         question_refs = [ref for ref in thread_refs if _is_question_or_request(source_text(sources[ref]))]
+        if question and not question_refs:
+            raise ModelFailure("topic question has no source question")
         contributor_refs = [
             ref for ref in thread_refs
             if ref not in question_refs
@@ -135,13 +137,16 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
                 if url not in urls:
                     urls.append(url)
 
-        update_lines = [f"{topic} — {title}"]
-        update_lines.append(f"Question asked: {question}")
-        narrative = list(dict.fromkeys(line for line in (situation, recommendation) if line))
-        update_lines.extend(narrative)
+        update_lines = [f"## {title}"]
+        if question:
+            update_lines.append(f"Question asked: {question}")
+        if situation:
+            update_lines.append(f"Summary: {situation}")
+        if recommendation:
+            update_lines.append(f"Action / follow-up: {recommendation}")
         specifics_not_in_narrative = [
             value for value in specific_values
-            if not any(value in line for line in narrative)
+            if not any(value in line for line in (situation, recommendation))
         ]
         commands = [value for value in specifics_not_in_narrative if value.startswith("/")]
         key_details = [
@@ -160,10 +165,12 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
             update_lines.append(f"Limitation: {limitation}")
         if urls:
             update_lines.append(f"Reference: {'; '.join(urls)}")
-        if question_refs:
-            update_lines.append(f"Asked by: {', '.join(names(question_refs, sources))}")
-        if contributor_refs:
-            update_lines.append(f"Contributors: {', '.join(names(contributor_refs, sources))}")
+        question_names = names(question_refs, sources)
+        contributor_names = names(contributor_refs, sources)
+        if question_names:
+            update_lines.append(f"Asked by: {', '.join(question_names)}")
+        if contributor_names:
+            update_lines.append(f"Contributors: {', '.join(contributor_names)}")
         if confidence == "field_guidance" and not limitation:
             update_lines.append("Field guidance; not formally verified.")
         update_blocks.append("\n".join(update_lines))
@@ -192,15 +199,20 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
             raise ModelFailure("unanswered source is not a unique technical question or issue")
         seen_unanswered.add(question_ref)
         assigned.update(refs)
-        asker = ", ".join(names([question_ref], sources))
-        unanswered_blocks.append(
-            f"{topic}\n* Question / unresolved issue: {unresolved}\n* Asked by: {asker}\n* Status: {reason}"
-        )
+        asker_names = names([question_ref], sources)
+        unanswered_lines = [
+            topic,
+            f"* Question / unresolved issue: {unresolved}",
+        ]
+        if asker_names:
+            unanswered_lines.append(f"* Asked by: {', '.join(asker_names)}")
+        unanswered_lines.append(f"* Status: {reason}")
+        unanswered_blocks.append("\n".join(unanswered_lines))
 
     actionable = "\n\n".join(update_blocks)
     if unanswered_blocks:
         actionable += "\n\nUnanswered / incomplete topics\n\n" + "\n\n".join(unanswered_blocks)
-    return f"Technical Updates — {date_label(items)}\n\n" + actionable
+    return f"# Technical Updates — {date_label(items)}\n\n" + actionable
 
 
 def _provenance_revision(reference: str, sources: Mapping[str, Mapping[str, Any]]) -> list[object]:
@@ -259,9 +271,10 @@ def actionable_prompt(items: Sequence[dict[str, Any]], instruction: str = "") ->
         "80–95% message reduction. Within each thread, resolve corrections and superseded suggestions before writing the final conclusion; "
         "exclude greetings, thanks, simple confirmations, repeated quotes, social content, customer-only detail, rejected suggestions, and "
         "unconfirmed speculation. Use raw_keep_refs only for original messages carrying the final useful knowledge, never filler; they are audit "
-        "metadata and will not be reader-facing. For every retained topic, populate question with a concise one-sentence restatement of its original "
-        "request, grounded in that topic's sources; do not quote a long message. Write concise situation, recommendation, and limitation text only where each adds useful information; "
-        "use empty strings for inapplicable fields rather than padding the topic with generic cautions. Put only atomic exact commands, versions, KB "
+        "metadata and will not be reader-facing. Populate question only when a topic source contains a real question or request; otherwise emit an empty "
+        "question. Never recast an announcement, instruction, status, or directive as a question. Write concise situation, recommendation, and limitation text "
+        "only where each adds useful information; for administrative announcements, state the update directly and keep recommendation empty unless the source "
+        "explicitly asks for follow-up. Use empty strings for inapplicable fields rather than padding the topic with generic cautions. Put only atomic exact commands, versions, KB "
         "identifiers, or reusable tool identifiers in specifics—never explanatory sentences. Never normalize, concatenate, or remove punctuation from "
         "source versions, KB IDs, commands, or URLs: every protected value must be an exact source substring. Put URL-bearing sources in reference_refs; URLs are extracted "
         "locally. The reader-facing output is a compact Technical Updates brief with no raw-message section and no boilerplate field labels. Local validation derives "

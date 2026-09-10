@@ -93,6 +93,18 @@ class ModelProviderTests(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_hermes_codex_adapter_reports_when_schema_pushes_structured_input_over_budget(self) -> None:
+        calls = []
+        model = HermesOpenAICodexModel(
+            "gpt-5.6-terra", timeout=17, max_input_bytes=100, max_output_chars=64,
+            reasoning_effort="high", runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+        with self.assertRaisesRegex(ModelFailure, "including response schema"):
+            model.complete_structured("x" * 70, {"type": "object", "properties": {"value": {"type": "string"}}})
+
+        self.assertEqual(calls, [])
+
     def test_hermes_codex_adapter_rejects_oversized_response_before_parsing(self) -> None:
         def runner(command, **kwargs):
             return subprocess.CompletedProcess(command, 0, "x" * 65, "")

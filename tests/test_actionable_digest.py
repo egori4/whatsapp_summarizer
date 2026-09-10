@@ -167,7 +167,7 @@ class ActionableDigestTests(unittest.TestCase):
     def test_thread_renderer_emits_a_compact_reader_facing_digest_without_raw_evidence(self):
         rendered = render_actionable(json.dumps(self.response()), self.sources())
 
-        self.assertTrue(rendered.startswith("Technical Updates — Sep 1–2"))
+        self.assertTrue(rendered.startswith("# Technical Updates — Sep 1–2"))
         self.assertNotIn("RAW MESSAGES WORTH KEEPING", rendered)
         self.assertNotIn("Situation:", rendered)
         self.assertNotIn("Recommendation:", rendered)
@@ -197,6 +197,30 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("Commands:", block)
         self.assertNotIn("Limitation:", block)
         self.assertIn("Reference: https://support.example.invalid/answer/1136675", block)
+
+    def test_administrative_announcement_cannot_render_an_invented_question(self):
+        sources = [{
+            "message_id": "announcement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The regional call is cancelled. Please use the time to catch up and raise urgent findings.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Regional call", "title": "Regional Call Cancelled",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "situation": "The regional call is cancelled.",
+                "recommendation": "Use the available time to catch up and raise urgent findings.",
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("Regional Call Cancelled", rendered)
+        self.assertNotIn("Question asked:", rendered)
+        self.assertNotIn("Asked by:", rendered)
 
     def test_reader_omits_redundant_field_guidance_and_reference_identifier(self):
         response = self.response()
@@ -273,7 +297,7 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Migration utility", "title": "Configuration migration",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "Which tool migrates configuration?",
+                "question": "",
                 "situation": "", "recommendation": "Use the migration tool.",
                 "specifics": [{"source_ref": "S001", "value": "migration tool"}],
                 "limitation": "", "reference_refs": ["S001"], "confidence": "documented",
@@ -286,6 +310,33 @@ class ActionableDigestTests(unittest.TestCase):
         rendered = render_actionable(json.dumps(response), sources)
         self.assertIn("Unanswered / incomplete topics", rendered)
         self.assertIn("How can we migrate historical traffic statistics?", rendered)
+
+    def test_unanswered_omits_numeric_sender_metadata(self):
+        sources = [{
+            "message_id": "answer", "change_seq": 1, "display_name": "Engineer B",
+            "timestamp": "2026-09-01T13:00:00+00:00", "text": "Use /info/interface/dump.",
+        }, {
+            "message_id": "q", "change_seq": 2, "participant": "19995550123@s.whatsapp.net",
+            "display_name": "19995550123", "timestamp": "2026-09-01T13:01:00+00:00",
+            "text": "Which command checks the interface state?",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Interface command", "title": "Inspection command",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "situation": "", "recommendation": "Use /info/interface/dump.",
+                "specifics": [{"source_ref": "S001", "value": "/info/interface/dump"}],
+                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [{
+                "topic": "Interface state", "question_source_ref": "S002", "context_refs": [],
+                "reason": "No reusable answer was established.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("Asked by:", rendered)
+        self.assertNotIn("19995550123", rendered)
 
     def test_unanswered_may_be_a_technical_issue_statement_without_question_form(self):
         sources = [{
@@ -302,7 +353,7 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Packet reporting", "title": "Protocol behavior gap",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "Which packet-reporting configuration should be documented?",
+                "question": "",
                 "situation": "Document packet-reporting configuration before investigating protocol gaps.",
                 "recommendation": "Document packet-reporting configuration.", "specifics": [],
                 "limitation": "", "reference_refs": [], "confidence": "field_guidance",
@@ -333,6 +384,34 @@ class ActionableDigestTests(unittest.TestCase):
         }
         rendered = render_actionable(json.dumps(response), sources)
         self.assertIn("Asked by: Engineer A", rendered)
+        self.assertIn("Contributors: Engineer B", rendered)
+
+    def test_attribution_omits_numeric_sender_metadata(self):
+        sources = [
+            {
+                "message_id": "q", "change_seq": 1, "participant": "19995550123@s.whatsapp.net",
+                "display_name": "19995550123", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "Which command checks the interface state?",
+            },
+            {
+                "message_id": "a", "change_seq": 2, "display_name": "Engineer B",
+                "timestamp": "2026-09-01T13:01:00+00:00", "text": "Use /info/interface/dump.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Interface state", "title": "Inspection command",
+                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
+                "question": "Which command checks interface state?",
+                "situation": "", "recommendation": "Use /info/interface/dump.",
+                "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
+                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }], "unanswered": [],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("Asked by:", rendered)
+        self.assertNotIn("19995550123", rendered)
         self.assertIn("Contributors: Engineer B", rendered)
 
     def test_specifics_are_canonicalized_to_exact_protected_source_values(self):
