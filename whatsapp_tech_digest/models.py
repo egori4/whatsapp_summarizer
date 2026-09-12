@@ -68,15 +68,41 @@ def _is_question_or_request(text: str) -> bool:
     normalized = " ".join(text.split()).casefold()
     if not normalized:
         return False
-    return "?" in normalized or re.match(
-        r"(?:does|do|can|could|would|should|is|are|has|have|what|which|where|when|why|how|anybody|anyone|who|need|looking for|request(?:ing)?|please (?:share|send|recommend)|seeking)\b",
-        normalized,
-    ) is not None
+    for clause in re.split(r"(?:(?<=[.!?])\s+|[:,;]\s*|\s+[—-]\s+)", normalized):
+        clause = re.sub(
+            r"^(?:(?:hello|hi|dear|good morning|gm)\s+)?(?:team|guys|mates)[,.:;!]?\s*",
+            "",
+            clause,
+        )
+        if re.match(
+            r"(?:need help|help needed|i need help|looking for|request(?:ing)?|"
+            r"please (?:share|send|recommend|help)|seeking)\b",
+            clause,
+        ):
+            return True
+        if re.match(r"(?:any idea|anyone know|wondering (?:if|whether)|has anyone|do you know)\b", clause):
+            return True
+        if re.match(
+            r"(?:(?:do|did|can|could|would|should|have|has)\s+"
+            r"(?:i|we|you|anyone|anybody|someone|somebody)|"
+            r"(?:does|is|are)\s+(?:it|this|that|there|the|a|an))\b",
+            clause,
+        ):
+            return True
+        # A bare wh- opening also introduces relative and exclamative clauses, so it needs interrogative punctuation.
+        if "?" in clause and re.match(
+            r"(?:does|do|did|can|could|would|should|is|are|has|have|"
+            r"what|which|where|when|why|how|who|"
+            r"anybody|anyone|somebody|any idea|wondering)\b",
+            clause,
+        ):
+            return True
+    return False
 
 
 def _has_technical_signal(text: str) -> bool:
     return re.search(
-        r"\b(?:tool|utility|version|release|upgrad\w*|migration|configuration|config|policy|command|api|service|system|software|hardware|network|feature|capability|support|cli|script|log|error|issue|problem|bug|cve|ddos|waf|attack|traffic|packet|rule|signature|license|account|certificate|port|dns|ip|url|repository|repo|github|server|device|platform|product|appliance|interface|deployment|deploy|rollback)\b",
+        r"\b(?:tool|utility|version|release|upgrad\w*|migration|configuration|config|policy|profile|command|api|service|software|hardware|network|feature|capability|cli|script|log|error|issue|problem|bug|cve|ddos|waf|attack|traffic|packet|rule|signature|license|certificate|port|dns|gslb|ip|url|repository|repo|github|server|device|platform|product|appliance|interfaces?|deployment|deploy|rollback|cluster|cable|sync|arp|mac|protocol)\b",
         " ".join(text.split()).casefold(),
     ) is not None
 
@@ -87,6 +113,36 @@ def _is_technical_question(text: str) -> bool:
     if not normalized:
         return False
     return _has_technical_signal(normalized) and _is_question_or_request(normalized)
+
+
+def _is_unresolved_technical_issue(text: str) -> bool:
+    """Recognize a technical problem statement independently of model labels."""
+    normalized = " ".join(text.split()).casefold()
+    if not normalized or not _has_technical_signal(normalized):
+        return False
+    problem = re.search(
+        r"\b(?:fail\w*|error|issue|problem|bug|cannot|unavailable|missing|differs|unexpected|"
+        r"unexplained|blocked|stuck|broken|degraded|timeout|timed out|crash\w*)\b"
+        r"|\b(?:does not|doesn't|did not|is not|isn't|not)\s+(?:work\w*|sync\w*|respond\w*|available)\b"
+        r"|\bno\s+(?:answer|resolution|workaround)\b",
+        normalized,
+    )
+    if problem is None:
+        return False
+    resolution = re.search(
+        r"\b(?:fixed|resolved|solved|patched|corrected|restored|mitigated|workaround (?:was )?applied)\b",
+        normalized,
+    )
+    if resolution is None:
+        return True
+    still_open = re.search(
+        r"\b(?:not|never|isn't|wasn't|hasn't been)\s+(?:fully\s+)?(?:fixed|resolved|solved|patched|corrected|restored|mitigated)\b"
+        r"|\b(?:partially|temporarily)\s+(?:fixed|resolved|solved|patched|corrected|restored|mitigated)\b"
+        r"|\b(?:still|continues? to|persists?|remains?)\b.{0,80}\b(?:fail\w*|error|issue|problem|broken|degraded)\b"
+        r"|\b(?:but|however|yet)\b.{0,80}\b(?:fail\w*|error|issue|problem|persists?|remains?)\b",
+        normalized,
+    )
+    return still_open is not None
 
 
 def stage_zero(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:

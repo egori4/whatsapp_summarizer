@@ -23,11 +23,11 @@ At 08:00, an inactive future timer would invoke `render-only` and write an owner
 
 This preserves the tested reviewed-artifact security boundary.
 
-### Not staged: unattended automatic email
+### Available but not recommended by default: unattended automatic email
 
-An unattended `delivery-capable` timer could generate and submit a digest without a human review of the exact artifact. That does not satisfy the reviewed-artifact gate used by R5. It is deliberately not implemented or enabled by this design.
+The repository contains an inert unattended wrapper and systemd-unit generator capable of a `delivery-capable` model-and-SMTP run. That path does not satisfy the reviewed-artifact gate because a human does not review the exact bytes before submission. Source availability does not authorize installation, activation, model execution, or delivery.
 
-If Egor chooses unattended delivery later, it requires a new explicit policy decision that authorizes that reduced review boundary, a dedicated protected credential-loading wrapper, focused tests, a separate source review/commit, DST verification, and a separate activation approval.
+If unattended delivery is chosen, it requires an explicit policy decision accepting that reduced review boundary, fresh source review, DST verification, protected-credential verification, and a separate activation approval.
 
 ## Required activation sequence
 

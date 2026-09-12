@@ -19,7 +19,7 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "type": "object", "additionalProperties": False,
         "required": [
             "topic", "title", "source_refs", "raw_keep_refs",
-            "question", "situation", "recommendation", "specifics", "limitation",
+            "question", "question_source_ref", "question_source_kind", "situation", "recommendation", "actions", "specifics", "limitation",
             "reference_refs", "confidence",
         ],
         "properties": {
@@ -28,8 +28,11 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "source_refs": required_ref_array,
             "raw_keep_refs": required_ref_array,
             "question": {"type": "string", "maxLength": 240},
+            "question_source_ref": {"anyOf": [ref, {"type": "null"}]},
+            "question_source_kind": {"anyOf": [{"type": "string", "enum": ["QUESTION"]}, {"type": "null"}]},
             "situation": {"type": "string", "maxLength": 600},
             "recommendation": {"type": "string", "maxLength": 600},
+            "actions": {"type": "array", "maxItems": 12, "items": {"type": "string", "minLength": 1, "maxLength": 600}, "uniqueItems": True},
             "specifics": {"type": "array", "items": specific, "uniqueItems": True},
             "limitation": {"type": "string", "maxLength": 600},
             "reference_refs": ref_array,
@@ -38,10 +41,11 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
     unanswered = {
         "type": "object", "additionalProperties": False,
-        "required": ["topic", "question_source_ref", "context_refs", "reason"],
+        "required": ["topic", "question_source_ref", "question_source_kind", "context_refs", "reason"],
         "properties": {
             "topic": {"type": "string", "minLength": 1, "maxLength": 80},
             "question_source_ref": ref,
+            "question_source_kind": {"type": "string", "enum": ["QUESTION", "ISSUE"]},
             "context_refs": ref_array,
             "reason": {"type": "string", "minLength": 1, "maxLength": 220},
         },
@@ -54,7 +58,7 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
                 "type": "object", "additionalProperties": False, "required": refs,
                 "properties": {reference: {"type": "string", "enum": ["INCLUDE", "EXCLUDE", "CONTEXT", "UNCERTAIN"]} for reference in refs},
             },
-            "topics": {"type": "array", "minItems": 1, "maxItems": 8, "items": topic},
-            "unanswered": {"type": "array", "items": unanswered},
+            "topics": {"type": "array", "maxItems": 8, "items": topic},
+            "unanswered": {"type": "array", "maxItems": 8, "items": unanswered},
         },
     }

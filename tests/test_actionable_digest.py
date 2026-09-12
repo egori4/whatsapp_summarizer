@@ -5,7 +5,7 @@ import unittest
 
 from whatsapp_tech_digest.actionable_render import render_actionable as extracted_render_actionable
 from whatsapp_tech_digest.actionable_schema import actionable_schema
-from whatsapp_tech_digest.actionable_validate import actionable_source_map
+from whatsapp_tech_digest.actionable_validate import actionable_source_map, protected_values
 from whatsapp_tech_digest.models import ModelFailure, StaticModel, render_actionable, summarize_actionable
 
 
@@ -94,9 +94,12 @@ class ActionableDigestTests(unittest.TestCase):
                     "title": "Direct upgrade path",
                     "source_refs": [ref("upgrade-question", 1), ref("upgrade-answer", 2), ref("upgrade-kb", 3)],
                     "raw_keep_refs": [ref("upgrade-question", 1), ref("upgrade-answer", 2), ref("upgrade-kb", 3)],
-                    "question": "Can Controller KVM upgrade directly to 10.14.0 after intermediate-package failures?",
-                    "situation": "Intermediate upgrades from 10.10.6 toward 10.14.0 can fail at 10.11.0 with package exit code 100.",
+                    "question": "Has anyone upgraded Controller KVM from 10.10.6 toward 10.14.0?",
+                    "question_source_ref": ref("upgrade-question", 1),
+                    "question_source_kind": "QUESTION",
+                    "situation": "Intermediate 10.11.0 fails with package exit code 100.",
                     "recommendation": "Upgrade directly to 10.14.0.",
+                    "actions": [],
                     "specifics": [
                         {"source_ref": ref("upgrade-answer", 2), "value": "10.14.0"},
                     ],
@@ -109,14 +112,17 @@ class ActionableDigestTests(unittest.TestCase):
                     "title": "Stale ARP checks",
                     "source_refs": [ref("mac-question", 4), ref("correction", 6), ref("commands", 7)],
                     "raw_keep_refs": [ref("commands", 7)],
-                    "question": "How should stale ARP be checked after an appliance replacement?",
-                    "situation": "Use these checks when stale ARP is suspected after appliance replacement.",
-                    "recommendation": "Inspect ARP state and send a gratuitous ARP for the affected IP.",
+                    "question": "How can I check stale ARP after replacing the appliance?",
+                    "question_source_ref": ref("mac-question", 4),
+                    "question_source_kind": "QUESTION",
+                    "situation": "",
+                    "recommendation": "",
+                    "actions": [],
                     "specifics": [
                         {"source_ref": ref("commands", 7), "value": "/info/l3/arp/dump"},
                         {"source_ref": ref("commands", 7), "value": "/oper/garp <ip_address>"},
                     ],
-                    "limitation": "The Monitoring suggestion was not confirmed by the requester.",
+                    "limitation": "I did not see the MAC address in Monitoring.",
                     "reference_refs": [],
                     "confidence": "field_guidance",
                 },
@@ -137,12 +143,17 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("reason_kept", required)
         self.assertNotIn("question_refs", required)
         self.assertNotIn("contributor_refs", required)
+        self.assertIn("question_source_ref", required)
+        self.assertIn("question_source_kind", required)
+        unanswered_required = actionable_schema(self.sources())["properties"]["unanswered"]["items"]["required"]
+        self.assertIn("question_source_kind", unanswered_required)
 
     def test_unanswered_cannot_reuse_a_source_assigned_to_a_topic(self):
         response = self.response()
         response["unanswered"] = [{
             "topic": "Duplicate question",
             "question_source_ref": "S001",
+            "question_source_kind": "QUESTION",
             "context_refs": [],
             "reason": "The topic source is already represented above.",
         }]
@@ -173,10 +184,10 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("Recommendation:", rendered)
         self.assertIn("Upgrade directly to 10.14.0.", rendered)
         self.assertIn(
-            "Question asked: Can Controller KVM upgrade directly to 10.14.0 after intermediate-package failures?",
+            "Question asked: Has anyone upgraded Controller KVM from 10.10.6 toward 10.14.0?",
             rendered,
         )
-        self.assertIn("Question asked: How should stale ARP be checked after an appliance replacement?", rendered)
+        self.assertIn("Question asked: How can I check stale ARP after replacing the appliance?", rendered)
         self.assertIn("Commands: /info/l3/arp/dump; /oper/garp <ip_address>", rendered)
         self.assertIn("Asked by: Engineer A", rendered)
         self.assertIn("Contributors: Engineer B, Engineer C", rendered)
@@ -209,8 +220,10 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Regional call", "title": "Regional Call Cancelled",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "", "situation": "The regional call is cancelled.",
-                "recommendation": "Use the available time to catch up and raise urgent findings.",
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "The regional call is cancelled.",
+                "recommendation": "Please use the time to catch up and raise urgent findings.",
+                "actions": [],
                 "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -222,14 +235,53 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("Question asked:", rendered)
         self.assertNotIn("Asked by:", rendered)
 
+    def test_administrative_announcement_preserves_direct_assignments_and_reports_source(self):
+        sources = [
+            {
+                "message_id": "planning", "change_seq": 1, "display_name": "Coordinator",
+                "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "The training schedule and topics are taking shape from team suggestions. Questions? They may be collected later. Detailed subjects will be published closer to the dates.",
+            },
+            {
+                "message_id": "ai", "change_seq": 2, "display_name": "Coordinator",
+                "timestamp": "2026-09-01T13:01:00+00:00",
+                "text": "The AI Team was specifically asked to lead an AI-tools session for daily and complex tasks and should receive most of the presentation time. Other regional members may volunteer.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Training planning", "title": "Training Planning and Presenter Nominations",
+                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S001", "S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "The training schedule and topics are taking shape from team suggestions.",
+                "recommendation": "", "actions": [
+                    "The AI Team was specifically asked to lead an AI-tools session for daily and complex tasks and should receive most of the presentation time.",
+                    "Other regional members may volunteer.",
+                ],
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("## Training Planning and Presenter Nominations", rendered)
+        self.assertIn("Actions / follow-up:", rendered)
+        self.assertIn("- The AI Team was specifically asked to lead an AI-tools session", rendered)
+        self.assertIn("- Other regional members may volunteer.", rendered)
+        self.assertIn("Reported by: Coordinator", rendered)
+        self.assertNotIn("Asked by:", rendered)
+        self.assertNotIn("Contributors:", rendered)
+
     def test_reader_omits_redundant_field_guidance_and_reference_identifier(self):
         response = self.response()
         response["topics"][0]["specifics"] = [{"source_ref": "S003", "value": "1136675"}]
-        response["topics"][0]["limitation"] = "Field guidance only."
+        response["topics"][0]["limitation"] = "Intermediate 10.11.0 fails with package exit code 100."
         rendered = render_actionable(json.dumps(response), self.sources())
         self.assertNotIn("Key details: 1136675", rendered)
         self.assertNotIn("Field guidance; not formally verified.", rendered)
-        self.assertIn("Limitation: The Monitoring suggestion was not confirmed by the requester.", rendered)
+        self.assertIn("Limitation: I did not see the MAC address in Monitoring.", rendered)
 
     def test_thread_renderer_rejects_invented_version_and_command(self):
         response = self.response()
@@ -253,8 +305,11 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Physical interfaces", "title": "Behavior confirmation",
                 "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
-                "question": "Does the behavior also apply to physical interfaces?",
-                "situation": "", "recommendation": "Apply the same behavior to physical interfaces.",
+                "question": "Is it the same for physical interfaces?",
+                "question_source_ref": "S001",
+                "question_source_kind": "QUESTION",
+                "situation": "", "recommendation": "The same behavior applies to physical interfaces.",
+                "actions": [],
                 "specifics": [], "limitation": "",
                 "reference_refs": [],
                 "confidence": "confirmed",
@@ -274,15 +329,17 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Alteon replacement", "title": "Stale ARP recovery",
                 "source_refs": ["S001", "S002", "S003"], "raw_keep_refs": ["S003"],
-                "question": "Can stale ARP prevent VIPs from working after an Alteon replacement?",
-                "situation": "VIPs can fail after appliance replacement because of stale ARP entries.",
+                "question": "After replacing an Alteon, can stale ARP entries prevent VIPs from working?",
+                "question_source_ref": "S002", "question_source_kind": "QUESTION",
+                "situation": "",
                 "recommendation": "Inspect ARP and send GARP for the affected IP.",
+                "actions": [],
                 "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
         self.assertIn(
-            "Question asked: Can stale ARP prevent VIPs from working after an Alteon replacement?",
+            "Question asked: After replacing an Alteon, can stale ARP entries prevent VIPs from working?",
             rendered,
         )
         self.assertNotIn("Question asked: How can I check the physical-port MAC address", rendered)
@@ -297,13 +354,14 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Migration utility", "title": "Configuration migration",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "",
-                "situation": "", "recommendation": "Use the migration tool.",
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "Use migration tool https://code.example.invalid/migrate.",
+                "actions": [],
                 "specifics": [{"source_ref": "S001", "value": "migration tool"}],
                 "limitation": "", "reference_refs": ["S001"], "confidence": "documented",
             }],
             "unanswered": [{
-                "topic": "Historical traffic migration", "question_source_ref": "S002",
+                "topic": "Historical traffic migration", "question_source_ref": "S002", "question_source_kind": "QUESTION",
                 "context_refs": [], "reason": "No reusable answer was established.",
             }],
         }
@@ -325,18 +383,49 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Interface command", "title": "Inspection command",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "", "situation": "", "recommendation": "Use /info/interface/dump.",
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "Use /info/interface/dump.",
+                "actions": [],
                 "specifics": [{"source_ref": "S001", "value": "/info/interface/dump"}],
                 "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }],
             "unanswered": [{
-                "topic": "Interface state", "question_source_ref": "S002", "context_refs": [],
+                "topic": "Interface state", "question_source_ref": "S002", "question_source_kind": "QUESTION", "context_refs": [],
                 "reason": "No reusable answer was established.",
             }],
         }
         rendered = render_actionable(json.dumps(response), sources)
         self.assertNotIn("Asked by:", rendered)
         self.assertNotIn("19995550123", rendered)
+
+    def test_unanswered_accepts_an_independently_detected_technical_issue(self):
+        sources = [{
+            "message_id": "issue", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The deployment behavior fails after enabling the policy, but no resolution was established.",
+        }, {
+            "message_id": "context", "change_seq": 2, "display_name": "Engineer B",
+            "timestamp": "2026-09-01T13:01:00+00:00",
+            "text": "The deployment was reviewed during the session.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Deployment review", "title": "Observed behavior",
+                "source_refs": ["S002"], "raw_keep_refs": ["S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "The deployment was reviewed during the session.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "field_guidance",
+            }],
+            "unanswered": [{
+                "topic": "Unresolved observed behavior", "question_source_ref": "S001", "question_source_kind": "ISSUE",
+                "context_refs": [], "reason": "No reusable resolution was established.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertIn("Unanswered / incomplete topics", rendered)
+        self.assertIn("The deployment behavior fails after enabling the policy", rendered)
 
     def test_unanswered_may_be_a_technical_issue_statement_without_question_form(self):
         sources = [{
@@ -353,13 +442,14 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Packet reporting", "title": "Protocol behavior gap",
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
-                "question": "",
+                "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "Document packet-reporting configuration before investigating protocol gaps.",
-                "recommendation": "Document packet-reporting configuration.", "specifics": [],
+                "recommendation": "", "specifics": [],
+                "actions": [],
                 "limitation": "", "reference_refs": [], "confidence": "field_guidance",
             }],
             "unanswered": [{
-                "topic": "Packet reporting", "question_source_ref": "S002", "context_refs": [],
+                "topic": "Packet reporting", "question_source_ref": "S002", "question_source_kind": "ISSUE", "context_refs": [],
                 "reason": "No reusable conclusion was established.",
             }],
         }
@@ -376,8 +466,11 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Interface state", "title": "Inspection command",
                 "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
-                "question": "Which command checks interface state?",
+                "question": "Which command checks the interface state?",
+                "question_source_ref": "S001",
+                "question_source_kind": "QUESTION",
                 "situation": "", "recommendation": "Use /info/interface/dump.",
+                "actions": [],
                 "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
                 "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }], "unanswered": [],
@@ -403,8 +496,10 @@ class ActionableDigestTests(unittest.TestCase):
             "topics": [{
                 "topic": "Interface state", "title": "Inspection command",
                 "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
-                "question": "Which command checks interface state?",
+                "question": "Which command checks the interface state?",
+                "question_source_ref": "S001", "question_source_kind": "QUESTION",
                 "situation": "", "recommendation": "Use /info/interface/dump.",
+                "actions": [],
                 "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
                 "limitation": "", "reference_refs": [], "confidence": "confirmed",
             }], "unanswered": [],
@@ -448,6 +543,555 @@ class ActionableDigestTests(unittest.TestCase):
         response["dispositions"]["S008"] = "CONTEXT"
         rendered = render_actionable(json.dumps(response), self.sources())
         self.assertNotIn("Thanks!", rendered)
+
+    def test_unanswered_rejects_context_disposition_for_question_or_context_refs(self):
+        response = self.response()
+        response["dispositions"]["S005"] = "CONTEXT"
+        response["unanswered"] = [{
+            "topic": "Unresolved behavior", "question_source_ref": "S005",
+            "question_source_kind": "ISSUE", "context_refs": ["S008"],
+            "reason": "No reusable resolution was established.",
+        }]
+        with self.assertRaisesRegex(ModelFailure, "unanswered refs must be included or uncertain"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_unanswered_rejects_question_ref_repeated_as_context(self):
+        response = self.response()
+        response["dispositions"]["S005"] = "INCLUDE"
+        response["unanswered"] = [{
+            "topic": "Unresolved behavior", "question_source_ref": "S005",
+            "question_source_kind": "ISSUE", "context_refs": ["S005"],
+            "reason": "No reusable resolution was established.",
+        }]
+        with self.assertRaisesRegex(ModelFailure, "unanswered question ref cannot be context"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_topic_question_requires_a_semantic_question_citation(self):
+        response = self.response()
+        response["topics"][0]["question_source_ref"] = None
+        with self.assertRaisesRegex(ModelFailure, "question must cite a source with semantic kind QUESTION"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_administrative_source_cannot_be_cited_as_a_question(self):
+        sources = [{
+            "message_id": "announcement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The regional call is cancelled. Prepare the slides before next week.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Regional call", "title": "Regional Call Cancelled",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "Should the regional call be cancelled?", "question_source_ref": "S001",
+                "question_source_kind": "ANNOUNCEMENT", "situation": "The regional call is cancelled.",
+                "recommendation": "Prepare the slides before next week.",
+                "actions": [],
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+        with self.assertRaisesRegex(ModelFailure, "question source must have semantic kind QUESTION"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_reader_facing_model_text_rejects_opaque_mention_placeholders(self):
+        for placeholder in ("[mentioned participant]", "[participant identifier]"):
+            with self.subTest(placeholder=placeholder):
+                response = self.response()
+                response["topics"][0]["actions"] = [f"{placeholder} should prepare the slides."]
+                with self.assertRaisesRegex(ModelFailure, "reader-facing identity placeholder"):
+                    render_actionable(json.dumps(response), self.sources())
+
+    def test_reader_can_use_the_locally_sanitized_exact_mention_excerpt(self):
+        sources = [{
+            "message_id": "assignment", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "@123456789 should prepare the slides.",
+            "redacted_text": "[mentioned participant] should prepare the slides.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "unanswered": [],
+            "topics": [{
+                "topic": "Presentation", "title": "Presentation assignment",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "", "actions": ["a participant should prepare the slides."],
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertIn("a participant should prepare the slides.", rendered)
+        self.assertNotIn("123456789", rendered)
+        self.assertNotIn("[mentioned participant]", rendered)
+
+    def test_topic_requires_actions_field_to_match_schema(self):
+        response = self.response()
+        response["topics"][0].pop("actions", None)
+        with self.assertRaisesRegex(ModelFailure, "actionable topic schema drift"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_unanswered_source_text_neutralizes_opaque_mentions(self):
+        sources = [
+            {"message_id": "issue", "change_seq": 1, "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00", "text": "Which CLI behavior should @123456789 inspect?"},
+            {"message_id": "update", "change_seq": 2, "display_name": "Engineer B", "timestamp": "2026-09-01T13:01:00+00:00", "text": "Use /info/interface/dump."},
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Inspection", "title": "Inspection command", "source_refs": ["S002"],
+                "raw_keep_refs": ["S002"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "", "recommendation": "Use /info/interface/dump.",
+                "actions": [], "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
+                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [{"topic": "Unresolved behavior", "question_source_ref": "S001", "question_source_kind": "QUESTION", "context_refs": [], "reason": "No reusable conclusion was established."}],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("@123456789", rendered)
+        self.assertIn("a participant", rendered)
+        self.assertIn("/info/interface/dump", rendered)
+
+    def test_unanswered_source_text_neutralizes_redacted_mention_placeholder(self):
+        sources = [
+            {"message_id": "issue", "change_seq": 1, "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00", "text": "Which CLI behavior should someone inspect?", "redacted_text": "Which CLI behavior should [mentioned participant] inspect?"},
+            {"message_id": "update", "change_seq": 2, "display_name": "Engineer B", "timestamp": "2026-09-01T13:01:00+00:00", "text": "Use /info/interface/dump."},
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Inspection", "title": "Inspection command", "source_refs": ["S002"],
+                "raw_keep_refs": ["S002"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "", "recommendation": "Use /info/interface/dump.",
+                "actions": [], "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
+                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [{"topic": "Unresolved behavior", "question_source_ref": "S001", "question_source_kind": "QUESTION", "context_refs": [], "reason": "No reusable conclusion was established."}],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("[mentioned participant]", rendered)
+        self.assertIn("a participant", rendered)
+
+    def test_reader_facing_model_text_rejects_numeric_opaque_mentions(self):
+        response = self.response()
+        response["topics"][0]["actions"] = ["@123456789 should prepare the slides."]
+        with self.assertRaisesRegex(ModelFailure, "reader-facing identity placeholder"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_reader_facing_model_text_rejects_participant_jids(self):
+        response = self.response()
+        response["topics"][0]["actions"] = ["15551234567@s.whatsapp.net should prepare the slides."]
+        with self.assertRaisesRegex(ModelFailure, "reader-facing identity placeholder"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_unanswered_source_text_neutralizes_participant_jids(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Which CLI behavior should 15551234567@s.whatsapp.net inspect?",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "cli-behavior", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "context_refs": [],
+                "reason": "No reusable answer was established.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("15551234567", rendered)
+        self.assertNotIn("s.whatsapp.net", rendered)
+        self.assertIn("a participant", rendered)
+
+    def test_unanswered_source_text_neutralizes_a_jid_before_sentence_punctuation(self):
+        sources = [{
+            "message_id": "issue", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The DNS sync error persists, ping 15550000004@s.whatsapp.net.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "dns-sync", "question_source_ref": "S001",
+                "question_source_kind": "ISSUE", "context_refs": [],
+                "reason": "No reusable resolution was established.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("15550000004", rendered)
+        self.assertNotIn("s.whatsapp.net", rendered)
+        self.assertIn("a participant", rendered)
+
+    def test_internal_unanswered_reason_does_not_trigger_reader_identity_validation(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Which CLI command checks interface state?",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "interface-state", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "context_refs": [],
+                "reason": "Ask @15550000005 for context.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("15550000005", rendered)
+        self.assertIn("No reusable answer was established", rendered)
+
+    def test_reader_rejects_an_unsupported_topic_narrative(self):
+        sources = [{
+            "message_id": "announcement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The regional call is cancelled.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Migration planning", "title": "Migration workshop",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "A migration workshop was scheduled for next week.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "unsupported narrative"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_reader_rejects_an_unsupported_technical_identifier(self):
+        sources = [{
+            "message_id": "migration", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The DPX500 migration session was rescheduled for next week.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Migration planning", "title": "Migration session",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "The DPX50 migration session was rescheduled for next week.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "unsupported protected value.*DPX50"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_reader_rejects_an_unsupported_action(self):
+        response = self.response()
+        response["topics"][0]["actions"] = ["Schedule an additional workshop for the regional team."]
+        with self.assertRaisesRegex(ModelFailure, "unsupported action"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_grounding_does_not_accept_a_shared_word_prefix(self):
+        sources = [{
+            "message_id": "migration", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00", "text": "The migration was cancelled.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Update", "title": "Update", "source_refs": ["S001"],
+                "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "The migraine was cancelled.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "unsupported narrative"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_grounding_does_not_stitch_excerpts_across_sources(self):
+        sources = [
+            {
+                "message_id": "first", "change_seq": 1, "display_name": "Coordinator",
+                "timestamp": "2026-09-01T13:00:00+00:00", "text": "The migration was",
+            },
+            {
+                "message_id": "second", "change_seq": 2, "display_name": "Coordinator",
+                "timestamp": "2026-09-01T13:01:00+00:00", "text": "cancelled tomorrow.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Update", "title": "Update", "source_refs": ["S001", "S002"],
+                "raw_keep_refs": ["S001", "S002"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "The migration was cancelled tomorrow.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "unsupported narrative"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_grounding_rejects_an_excerpt_that_drops_a_preceding_negator(self):
+        sources = [{
+            "message_id": "instruction", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Please do not restart the cluster before the upgrade completes.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "unanswered": [],
+            "topics": [{
+                "topic": "Upgrade", "title": "Upgrade instruction", "source_refs": ["S001"],
+                "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "", "recommendation": "",
+                "actions": ["restart the cluster before the upgrade completes."],
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+        }
+        with self.assertRaisesRegex(ModelFailure, "unsupported action"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_grounding_rejects_a_midword_excerpt(self):
+        sources = [{
+            "message_id": "instruction", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00", "text": "Restart the cluster.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "unanswered": [],
+            "topics": [{
+                "topic": "Cluster", "title": "Cluster", "source_refs": ["S001"],
+                "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
+                "question_source_kind": None, "situation": "estart the clus",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+        }
+        with self.assertRaisesRegex(ModelFailure, "unsupported narrative"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_protected_identifier_forms_are_exact_tokens(self):
+        identifiers = {"3PAR", "SRX_345", "v2", "802.11ax", "C++17", "DPX50"}
+        self.assertTrue(identifiers <= protected_values("Use 3PAR SRX_345 v2 802.11ax C++17 DPX50."))
+        self.assertNotIn("DPX50", protected_values("Use DPX500."))
+        self.assertFalse(any(
+            value.startswith("/")
+            for value in protected_values("See https://support.example.invalid/answer/1136675")
+        ))
+        self.assertIn(
+            "https://example.invalid/Function_(mathematics)",
+            protected_values("See https://example.invalid/Function_(mathematics) for details."),
+        )
+
+    def test_semantic_question_label_cannot_override_a_nonquestion_source(self):
+        sources = [{
+            "message_id": "announcement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The regional call is cancelled. Prepare the slides before next week.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Regional call", "title": "Regional call cancelled",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "Should the regional call be cancelled?", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "situation": "The regional call is cancelled.",
+                "recommendation": "Prepare the slides before next week.", "actions": [],
+                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "question source is not question-like"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_technical_directive_cannot_be_recast_as_a_topic_question(self):
+        sources = [{
+            "message_id": "directive", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Do not reboot the server during the migration window.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Migration window", "title": "Migration window",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "Do not reboot the server during the migration window.",
+                "question_source_ref": "S001", "question_source_kind": "QUESTION",
+                "situation": "Do not reboot the server during the migration window.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+        with self.assertRaisesRegex(ModelFailure, "question source is not question-like"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_relative_clause_statement_cannot_be_recast_as_a_topic_question(self):
+        sources = [{
+            "message_id": "statement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The upgrade is done, which resolves the DNS issue.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Upgrade", "title": "Upgrade",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "The upgrade is done, which resolves the DNS issue.",
+                "question_source_ref": "S001", "question_source_kind": "QUESTION",
+                "situation": "The upgrade is done, which resolves the DNS issue.",
+                "recommendation": "", "actions": [], "specifics": [], "limitation": "",
+                "reference_refs": [], "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+        with self.assertRaisesRegex(ModelFailure, "question source is not question-like"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_relative_clause_statement_is_not_an_unanswered_question(self):
+        sources = [{
+            "message_id": "statement", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "We rolled back the config, which restored the cluster sync.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "config-rollback", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "context_refs": [],
+                "reason": "No reusable answer was established.",
+            }],
+        }
+        with self.assertRaisesRegex(ModelFailure, "unanswered source is not a technical question or issue"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_interrogative_wh_questions_are_still_detected(self):
+        for text in (
+            "Which CLI command checks interface state?",
+            "What upgrade path does the appliance support?",
+            "Any idea why the GSLB sync stops after the upgrade?",
+        ):
+            sources = [{
+                "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+                "timestamp": "2026-09-01T13:00:00+00:00", "text": text,
+            }]
+            response = {
+                "dispositions": {"S001": "INCLUDE"}, "topics": [],
+                "unanswered": [{
+                    "topic": "open-question", "question_source_ref": "S001",
+                    "question_source_kind": "QUESTION", "context_refs": [],
+                    "reason": "No reusable answer was established.",
+                }],
+            }
+            with self.subTest(text=text):
+                self.assertIn(text, render_actionable(json.dumps(response), sources))
+
+    def test_unanswered_internal_topic_is_not_reader_facing(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Which CLI command checks interface state?",
+        }]
+        response = {"dispositions": {"S001": "INCLUDE"}, "topics": [], "unanswered": [{
+            "topic": "internal-unanswered-topic", "question_source_ref": "S001",
+            "question_source_kind": "QUESTION", "context_refs": [],
+            "reason": "No reusable answer was established.",
+        }]}
+
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertNotIn("internal-unanswered-topic", rendered)
+
+    def test_unanswered_issue_requires_independent_technical_problem_signal(self):
+        sources = [{
+            "message_id": "announcement", "change_seq": 1, "display_name": "Coordinator",
+            "timestamp": "2026-09-01T13:00:00+00:00", "text": "The maintenance window is closed.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "maintenance-window", "question_source_ref": "S001",
+                "question_source_kind": "ISSUE", "context_refs": [],
+                "reason": "No reusable resolution was established.",
+            }],
+        }
+        with self.assertRaisesRegex(ModelFailure, "unanswered source is not a technical question or issue"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_resolved_issue_cannot_render_as_unanswered(self):
+        sources = [{
+            "message_id": "resolved", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The DNS sync error was fixed this morning by the config rollback.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "dns-sync", "question_source_ref": "S001",
+                "question_source_kind": "ISSUE", "context_refs": [],
+                "reason": "No reusable resolution was established.",
+            }],
+        }
+        with self.assertRaisesRegex(ModelFailure, "unanswered source is not a technical question or issue"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_unanswered_only_digest_is_valid(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00", "text": "Which command checks interface state?",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"}, "topics": [],
+            "unanswered": [{
+                "topic": "interface-state", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "context_refs": [],
+                "reason": "No reusable answer was established.",
+            }],
+        }
+        rendered = render_actionable(json.dumps(response), sources)
+        self.assertIn("Unanswered / incomplete topics", rendered)
+        self.assertIn("Which command checks interface state?", rendered)
+
+    def test_unanswered_count_is_bounded(self):
+        sources = [
+            {
+                "message_id": f"question-{index}", "change_seq": index,
+                "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": f"Which CLI command checks interface state for port {index}?",
+            }
+            for index in range(1, 10)
+        ]
+        response = {
+            "dispositions": {f"S{index:03d}": "INCLUDE" for index in range(1, 10)},
+            "topics": [],
+            "unanswered": [
+                {
+                    "topic": f"interface-{index}", "question_source_ref": f"S{index:03d}",
+                    "question_source_kind": "QUESTION", "context_refs": [],
+                    "reason": "No reusable answer was established.",
+                }
+                for index in range(1, 10)
+            ],
+        }
+        with self.assertRaisesRegex(ModelFailure, "actionable topics or unanswered list invalid"):
+            render_actionable(json.dumps(response), sources)
+        self.assertEqual(actionable_schema(sources)["properties"]["unanswered"]["maxItems"], 8)
+
+    def test_specific_already_shown_in_question_is_not_repeated(self):
+        response = self.response()
+        response["topics"][0]["specifics"] = [{"source_ref": "S001", "value": "10.10.6"}]
+        rendered = render_actionable(json.dumps(response), self.sources())
+        self.assertNotIn("Key details: 10.10.6", rendered)
+
+    def test_recommendation_and_distinct_actions_are_both_rendered(self):
+        response = self.response()
+        response["topics"][0]["actions"] = ["Upgrade directly to 10.14.0."]
+        response["topics"][0]["recommendation"] = "Intermediate 10.11.0 fails with package exit code 100."
+        rendered = render_actionable(json.dumps(response), self.sources())
+        self.assertIn("Actions / follow-up:", rendered)
+        self.assertIn("Action / follow-up: Intermediate 10.11.0 fails with package exit code 100.", rendered)
 
     def test_actionable_failure_reports_bounded_local_validation_reason(self):
         invalid = StaticModel('{"wrong":"shape"}')

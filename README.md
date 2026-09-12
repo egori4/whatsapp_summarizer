@@ -6,7 +6,7 @@ A safety-gated collector and technical-digest pipeline for one explicitly approv
 
 **Read [`HANDOFF.md`](HANDOFF.md) and [`AGENTS.md`](AGENTS.md) before making changes.** This public repository intentionally contains only sanitized source, tests, and examples; live target identity, runtime state, and operational evidence remain owner-only and Git-ignored.
 
-The merged implementation provides a selective one-pass Hermes digest, compact renderer, and concise source-grounded topic questions. The published artifact is not a deployment: policy installation, service activation, scheduling, model execution, and delivery remain separate operator-controlled actions.
+The merged implementation provides a selective one-pass Hermes digest, compact renderer, and exact-source topic questions and conclusions. The published artifact is not a deployment: policy installation, service activation, scheduling, model execution, and delivery remain separate operator-controlled actions.
 
 Before publishing or deploying any change:
 
@@ -14,9 +14,52 @@ Before publishing or deploying any change:
 - confirm no policy, group directory, spool, rendered artifact, log, credential, session, recipient identity, or local path is staged;
 - use only the sanitized nondeployable policy example in this repository.
 
+## Version control
+
+The project uses semantic versioning. The single source of truth is `version` in [`pyproject.toml`](pyproject.toml), mirrored by `whatsapp_tech_digest.__version__`; update both in the same commit.
+
+| Version | Scope |
+| --- | --- |
+| `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest (current) |
+| `0.1.0` | Collector, spool, two-stage and one-pass pipelines, reviewed-artifact delivery, inert scheduler source |
+
+Versioning rules for this repository:
+
+- **Major** — a change to the collector-only boundary, the outbound-deny guard, the policy contract, or the reviewed-artifact delivery gate.
+- **Minor** — new or materially changed digest validation, grounding, rendering, privacy projection, or execution-mode behavior.
+- **Patch** — bug fixes, test additions, and documentation that do not change validated output.
+
+Only sanitized source, tests, examples, and documentation are committed. Policy, group directory, spool, rendered artifacts, review manifests, logs, credentials, and session data stay Git-ignored and owner-only. Run the full test suite and `git diff --check` before every commit, and obtain independent review for logic, privacy, or delivery-boundary changes.
+
 ## Current Version-Controlled Change
 
-This revision adds source-level safeguards for an unattended, reviewed-artifact delivery stage: an owner-only SMTP credential bridge, hardened generated systemd unit definitions, and regression coverage for exact reviewed-artifact delivery. It also records the associated operational contract in `UNATTENDED_DELIVERY_STAGE.md`.
+**`0.2.0` — Harden actionable digest grounding and unresolved tracking.**
+
+Grounding:
+
+- Substantive reader prose (question, narrative, recommendation, actions, limitation) must be a contiguous, word-bounded, normalized exact source excerpt after identity sanitization; fuzzy matching, cross-source stitching, and mid-word excerpts are rejected.
+- An excerpt that drops an immediately preceding negator is rejected, so a prohibition cannot be rendered as an instruction.
+- Protected technical identifiers use exact token occurrence instead of substring containment, covering short and punctuation-bearing forms such as `v2`, `3PAR`, `SRX_345`, `802.11ax`, and `C++17`.
+
+Question and unresolved-issue classification:
+
+- A reader-facing question requires a model-declared `QUESTION` kind plus an independent local check on **both** the cited source and the selected excerpt.
+- A bare wh- opening now requires interrogative punctuation, so relative and exclamative clauses are not recast as questions.
+- `ISSUE` entries require an unresolved technical problem signal and reject explicit resolution language unless the source states the problem is still open.
+- Unanswered topic labels are internal metadata and are not rendered; reader status text is derived locally. Unanswered entries are capped at eight.
+
+Privacy:
+
+- One shared identifier sanitizer backs both the model projection and reader-facing output, covering numeric mentions with optional `+` and device suffixes, participant/group/web/`lid` JID forms, and newsletter/broadcast handles.
+
+Other:
+
+- An unanswered-only source window is valid; only a window with neither retained updates nor validated unanswered items is rejected.
+- A `recommendation` is no longer dropped when the same topic also carries explicit actions.
+- Generated systemd units use `%h` instead of an embedded home path.
+- Restored the publication-safe [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md), [`RUNBOOK.md`](RUNBOOK.md), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+
+Known limitation: an all-nonmaterial active window stays pending instead of advancing an empty checkpoint. This is fail-closed and is scheduled for the isolated quality-evaluation phase before unattended operation.
 
 These are inert source artifacts. They do not install or enable units, access credentials, run a model, send email, or activate a schedule. Production policy, runtime state, credentials, rendered artifacts, and activation evidence remain owner-only and Git-ignored.
 
@@ -49,16 +92,16 @@ This remains the default for policies that omit `models.pipeline_mode`.
 #### One-pass Hermes Codex mode
 
 ```text
-all normalized current message revisions
+all eligible normalized current message revisions
   -> Hermes local CLI adapter
   -> openai-codex / gpt-5.6-terra / explicit high reasoning
   -> thread-level actionable schema
   -> strict local validation and rendering
 ```
 
-Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. The runner bypasses Ollama preclassification so supporting thread context is not dropped. The model clusters complete conversations, while the local renderer validates source references, commands, versions, identifiers, URLs, attribution, confidence, and unresolved issues.
+Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, word-bounded exact normalized and privacy-sanitized source excerpts, exact protected-token membership, attribution, confidence, and unresolved issues. Excerpts that drop an immediately preceding negator are rejected.
 
-Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped `key/token/password` assignments, and every reader-facing grounding check validates against that redacted form, so a masked secret cannot reach the rendered digest. The prompt itself is built from the complete normalized source record, so raw message text, participant identifiers, and display names do cross the configured model boundary. One-pass mode also forwards messages flagged `mechanical_ack` and `untrusted_policy_override` to the model; unlike two-stage mode, they are not dropped before the prompt, and injection resistance rests on the untrusted-data instruction plus the local output validator.
+Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, and resolvable opaque reply linkage only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode deterministically excludes messages flagged `mechanical_ack` or `untrusted_policy_override` before constructing the model prompt.
 
 The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
 
@@ -69,7 +112,7 @@ The one-pass actionable path is structurally isolated into `actionable_schema.py
 The runner does not use an ambiguous `dry_run` switch. It accepts `--execution-mode` and defaults to the safest mode:
 
 - `validate-only` (default): parses policy, snapshots the spool, checks omissions/current revisions, and performs deterministic normalization. It never builds a model, sends SMTP, records a digest run, or advances a checkpoint.
-- `render-only`: performs the same integrity checks and allows local model rendering, printing the rendered digest. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, the complete normalized source records — including raw text and participant metadata — cross the local Hermes CLI/provider boundary in this mode.
+- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, only the allowlisted redacted source projection crosses the local Hermes CLI/provider boundary.
 - `delivery-capable`: is the only mode permitted to call SMTP or persist digest-run/checkpoint outcomes. It invokes `require_live_safe()` and remains subject to the separate live-policy and operational-approval gates; selecting it in source does not authorize activation or delivery.
 
 Read-only state commands (`--health`, `--status`, `--purge`, and reconciliation commands) do not accept a non-default execution mode.
@@ -100,7 +143,7 @@ The complete field-use matrix and schema-v1 compatibility decision are in [`POLI
 
 ## Reader-facing summarization goal
 
-The final digest should be a selective senior-engineer brief, not a transcript. It renders no raw-message audit section and hides empty/non-applicable fields. Each retained topic begins with a concise source-grounded `Question asked` line, then the situation/conclusion. Retain only reusable material such as:
+The final digest should be a selective senior-engineer brief, not a transcript. It renders no raw-message audit section and hides empty/non-applicable fields. A retained Q&A topic begins with an exact normalized, privacy-sanitized source excerpt in `Question asked`; generated titles organize the brief, while substantive questions, summaries, recommendations, actions, and limitations must each be a contiguous source excerpt. Announcements and directives render directly as updates and actions. Retain only reusable material such as:
 
 - concrete upgrade/version guidance and failure signatures;
 - operational commands and procedures;

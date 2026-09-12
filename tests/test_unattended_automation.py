@@ -185,6 +185,8 @@ class UnattendedAutomationTests(TestCase):
         self.assertNotIn("CapabilityBoundingSet=", unit)
         self.assertIn("ReadWritePaths=/owner-only", unit)
         self.assertNotIn("EnvironmentFile=", unit)
+        self.assertNotIn("/home/", unit)
+        self.assertIn("Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin", unit)
 
     def test_timer_unit_is_daily_toronto_wall_clock_and_never_catches_up_late(self) -> None:
         unit = build_timer_unit()

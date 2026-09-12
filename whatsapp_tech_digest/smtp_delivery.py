@@ -26,7 +26,7 @@ def message_id(digest_id: str) -> str:
     return f"<{sha256(digest_id.encode('utf-8')).hexdigest()[:32]}@whatsapp-tech-digest.local>"
 
 
-_LABEL = re.compile(r"^(Question asked|Summary|Action / follow-up|Commands|Key details|Limitation|Reference|Asked by|Contributors):\s*(.*)$")
+_LABEL = re.compile(r"^(Question asked|Summary|Actions / follow-up|Action / follow-up|Commands|Key details|Limitation|Reference|Asked by|Reported by|Contributors):\s*(.*)$")
 
 
 def _inline_html(text: str) -> str:

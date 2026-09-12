@@ -5,11 +5,31 @@ from typing import Any, Mapping, Sequence
 
 
 _SECRET = re.compile(r"(?i)\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+")
+_WHATSAPP_JID = re.compile(
+    r"(?<![\w@])[A-Za-z0-9][A-Za-z0-9._+-]*(?::\d+)?@"
+    r"(?:s\.whatsapp\.net|c\.us|g\.us|lid|newsletter|broadcast)(?!\w)",
+    re.IGNORECASE,
+)
+_SPECIAL_HANDLE = re.compile(r"(?<!\w)@(?:newsletter|broadcast)(?!\w)", re.IGNORECASE)
+_MENTION_ID = re.compile(r"(?<!\w)@\+?\d{5,}(?::\d+)?(?!\w)")
+
+
+def contains_opaque_identifier(text: str) -> bool:
+    return any(pattern.search(text) for pattern in (_WHATSAPP_JID, _SPECIAL_HANDLE, _MENTION_ID))
+
+
+def sanitize_opaque_identifiers(text: str, replacement: str) -> str:
+    sanitized = _WHATSAPP_JID.sub(replacement, text)
+    sanitized = _SPECIAL_HANDLE.sub(replacement, sanitized)
+    return _MENTION_ID.sub(replacement, sanitized)
 
 
 def redact_text(text: str) -> str:
-    """Apply the final-model secret redaction idempotently."""
-    return _SECRET.sub("[REDACTED]", text)
+    """Apply final-model secret and opaque-mention redaction idempotently."""
+    redacted = _SECRET.sub("[REDACTED]", text)
+    redacted = _WHATSAPP_JID.sub("[participant identifier]", redacted)
+    redacted = _SPECIAL_HANDLE.sub("[mentioned participant]", redacted)
+    return _MENTION_ID.sub("[mentioned participant]", redacted)
 
 
 def model_source_refs(items: Sequence[Mapping[str, Any]]) -> list[str]:

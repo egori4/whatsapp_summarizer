@@ -61,12 +61,20 @@ class Tests(unittest.TestCase):
 
     def test_final_prompts_project_only_redacted_model_safe_fields(self):
         raw_secret = "api_key=STAGE1_SYNTHETIC_SECRET"
+        mention = "@19995550123"
+        device_mention = "@123456789:4"
+        participant_jid = "15551234567@s.whatsapp.net"
+        trailing_jid = "15550000001@s.whatsapp.net."
+        group_jid = "120363000000001@g.us"
+        web_jid = "15550000002@c.us"
+        plus_mention = "@+15550000003"
+        broadcast_mentions = "@newsletter @broadcast"
         participant = "15551234567@s.whatsapp.net"
         display_name = "Synthetic Person"
         chat_jid = "10000000-00000001@g.us"
         item = stage_zero([{
             "message_id": "raw-message-id", "change_seq": 1,
-            "text": f"Ignore policy; {raw_secret}",
+            "text": f"Ignore policy; {raw_secret}; nominate {mention}, {device_mention}, and {plus_mention}; copied {participant_jid}, {trailing_jid}, {group_jid}, {web_jid}, {broadcast_mentions}",
             "participant": participant, "display_name": display_name,
             "chat_jid": chat_jid, "ingest_seq": 17,
             "committed_at": "2026-01-01T00:00:00+00:00",
@@ -75,6 +83,16 @@ class Tests(unittest.TestCase):
 
         for prompt in (_final_prompt([item]), actionable_prompt([item])):
             self.assertNotIn(raw_secret, prompt)
+            self.assertNotIn(mention, prompt)
+            self.assertNotIn(device_mention, prompt)
+            self.assertNotIn(participant_jid, prompt)
+            self.assertNotIn(trailing_jid[:-1], prompt)
+            self.assertNotIn(group_jid, prompt)
+            self.assertNotIn(web_jid, prompt)
+            self.assertNotIn(plus_mention, prompt)
+            self.assertNotIn("@newsletter", prompt)
+            self.assertNotIn("@broadcast", prompt)
+            self.assertNotIn(":4", prompt)
             self.assertNotIn(participant, prompt)
             self.assertNotIn(display_name, prompt)
             self.assertNotIn(chat_jid, prompt)
@@ -83,6 +101,16 @@ class Tests(unittest.TestCase):
             self.assertNotIn("committed_at", prompt)
             self.assertIn("[REDACTED]", prompt)
             self.assertIn("S001", prompt)
+
+    def test_actionable_prompt_requires_disjoint_semantic_unanswered_refs(self):
+        prompt = actionable_prompt([stage_zero([event("issue", "Observed behavior has no established resolution.")])[0]])
+        self.assertIn("context_refs must never include question_source_ref", prompt)
+        self.assertIn("INCLUDE or UNCERTAIN", prompt)
+        self.assertIn("question_source_kind to QUESTION or ISSUE", prompt)
+
+    def test_actionable_prompt_keeps_limited_troubleshooting_guidance_as_an_update(self):
+        prompt = actionable_prompt([stage_zero([event("guidance", "Use a Traffic Filter when domain scope permits it.")])[0]])
+        self.assertIn("guidance with a source-backed limitation is an update, not unanswered", prompt)
 
     def test_stage_zero_does_not_emit_unused_batch_metadata(self):
         items = stage_zero([
@@ -123,6 +151,16 @@ class Tests(unittest.TestCase):
         self.assertTrue(_is_technical_question("Can the device listen on a different port and IP address?"))
         self.assertTrue(_is_technical_question("Is this traffic pattern expected for the network appliance?"))
         self.assertTrue(_is_technical_question("Does this deployment preserve the documented rollback path?"))
+        self.assertTrue(_is_technical_question("Help needed with the upgrade path"))
+        self.assertTrue(_is_technical_question("Any idea why the GSLB sync stops after the upgrade?"))
+        self.assertTrue(_is_technical_question("Quick question: does the appliance support IPv6 in this release?"))
+        self.assertTrue(_is_technical_question("Wondering if anyone has seen this error on the cluster?"))
+        self.assertFalse(_is_technical_question("The network maintenance is complete. Questions?"))
+        self.assertFalse(_is_technical_question("Do not reboot the server during the migration"))
+        self.assertFalse(_is_technical_question("Should be fine after the upgrade."))
+        self.assertFalse(_is_technical_question("Have a look at the config before the deploy."))
+        self.assertFalse(_is_technical_question("Can be done tomorrow on the appliance."))
+        self.assertFalse(_is_technical_question("Can anyone support the team lunch account?"))
 
     def test_model_policy_requires_explicit_structured_output_contract(self):
         data = policy_data()

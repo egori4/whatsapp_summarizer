@@ -57,7 +57,7 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 ReadWritePaths={_value(state_dir)}
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=PATH=/home/egori4/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 """
 
 
