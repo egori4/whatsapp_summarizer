@@ -4,7 +4,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 
-_SECRET = re.compile(r"(?i)\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+")
+_SECRET = re.compile(r"(?i)\b(?:api[_-]?(?:key|token)|token|password|secret)\s*[:=]\s*\S+")
 _WHATSAPP_JID = re.compile(
     r"(?<![\w@])[A-Za-z0-9][A-Za-z0-9._+-]*(?::\d+)?@"
     r"(?:s\.whatsapp\.net|c\.us|g\.us|lid|newsletter|broadcast)(?!\w)",

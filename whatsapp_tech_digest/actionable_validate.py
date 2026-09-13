@@ -16,10 +16,18 @@ _PROTECTED_PATH = re.compile(
 _PROTECTED_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_+-])[A-Za-z0-9](?:[A-Za-z0-9_+.-]*[A-Za-z0-9+])?(?![A-Za-z0-9_+-])"
 )
-_LOW_CONFIDENCE = re.compile(r"(?i)\b(?:i think|i believe|probably|if i recall|not sure|maybe)\b")
+_LOW_CONFIDENCE = re.compile(
+    r"(?i)\b(?:i think|i believe|i guess|probably|possibly|perhaps|maybe|might|seems?|seemed|"
+    r"apparently|afaik|iirc|if i recall|not sure|unsure|unconfirmed|not confirmed)\b"
+)
 _IDENTITY_LABEL = re.compile(r"^\+?\d[\d\s().-]{5,}$")
 _MENTION_PLACEHOLDER = re.compile(r"\[mentioned participant\]", re.IGNORECASE)
 _PARTICIPANT_PLACEHOLDER = re.compile(r"\[participant identifier\]", re.IGNORECASE)
+# Deliberately over-inclusive: a false positive only forces the model to keep a message.
+_STATUS_CHANGE = re.compile(
+    r"(?i)\b(?:cancell?ed|cancell?ing|cancels|called off|reschedul\w*|schedul\w*|confirm\w*|"
+    r"postpon\w*|deferr\w*|delay\w*|moved|pushed back|brought forward|no longer (?:happening|taking place))\b"
+)
 
 
 def actionable_source_map(items: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -29,6 +37,18 @@ def actionable_source_map(items: Sequence[dict[str, Any]]) -> dict[str, dict[str
 
 def source_text(item: Mapping[str, Any]) -> str:
     return str(item.get("redacted_text") or item.get("text") or "")
+
+
+def announces_status_change(text: str) -> bool:
+    """Detect a declarative, unhedged statement that something was scheduled, moved, or called off.
+
+    This is a recall net, not a classifier: its only consequence is that the model must
+    account for the message rather than drop it silently.
+    """
+    return any(
+        "?" not in sentence and not low_confidence(sentence) and _STATUS_CHANGE.search(sentence)
+        for sentence in re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+    )
 
 
 def _trim_url_punctuation(value: str) -> str:

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "example_only": true,
+  "target_group_jid": "10000000-00000001@g.us",
+  "silence": {"collector_consume": true, "bridge_deny_all_post": true, "operation_scope": ["send", "edit", "media", "poll", "location", "typing", "read", "progress", "unknown"]},
+  "whatsapp": {"mode": "allowlist", "group_policy": "allowlist", "group_allow_from": ["10000000-00000001@g.us"], "require_mention": false, "unauthorized_dm": "ignore", "send_read_receipts": false, "bridge_port": 0},
+  "schedule": {"timezone": "America/Toronto", "expression": "0 8 * * *", "activate_only_after_dst_contract": true},
+  "retention": {"raw_days": 7, "digest_days": 90},
+  "paths": {"spool": "/nondeployable-example/spool.sqlite3", "state_dir": "/nondeployable-example", "mode": "0700"},
+  "runtime": {"lock_seconds": 900, "max_runtime_seconds": 3600},
+  "health": {"heartbeat_seconds": 60},
+  "contacts": {"fallback": "display_name"},
+  "redaction": {"enabled": true},
+  "models": {"provider": "hermes-openai-codex", "pipeline_mode": "one_pass", "preclassifier": "gpt-5.6-terra", "final": "gpt-5.6-terra", "fallback": "gpt-5.6-terra", "timeout_seconds": 420, "batch_size": 2, "context_limit": 65536, "noise_threshold": 0.9, "endpoint": "local://hermes-cli", "reasoning_effort": "high", "max_output_tokens": 4096, "max_output_chars": 32768, "classifier_instruction": "Unused by the one-pass evaluation path.", "final_instruction": "Produce a concise manager-focused technical brief while preserving source-grounded facts, resolution state, corrections, limitations, and direct assignments."},
+  "external_fallback": {"enabled": false, "approved": false, "reduced_bundle_only": true},
+  "smtp": {"host": "smtp.example.invalid", "port": 587, "sender": "digest@example.invalid", "recipient": "owner@example.invalid", "password_env": "TECHTEAM_SMTP_PASSWORD", "timeout_seconds": 30}
+}

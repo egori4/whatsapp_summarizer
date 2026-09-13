@@ -2,6 +2,8 @@
 
 **Status:** Stage 1 specification approved and Stage 2 offline implementation approved in direct chat on 2026-09-03. This document does not authorize WhatsApp collection, gateway/plugin changes, restart, email, scheduling, or production-spool access.
 
+This document is the historical two-stage Ollama evaluation specification. Its Stage 3 preauthorization applies only to the stated loopback Ollama fixtures and does **not** authorize Hermes model calls. The separate one-pass Phase 2 design is in [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md).
+
 ## Objective
 
 Evaluate the offline classification and grounded-digest path against mixed group-style traffic: actionable technical and operational updates, ordinary chatter, technically worded non-actions, corrections, and adversarial input. The policy remains **high recall / conservative exclusion**: preserve potentially material updates rather than silently omitting them.

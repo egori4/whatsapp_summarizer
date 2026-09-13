@@ -33,6 +33,18 @@ Not present in Git:
 - Unanswered topic labels are internal grouping metadata and are not rendered. An unanswered-only source window is valid, and unanswered entries are capped at eight; only a window with neither retained updates nor validated unanswered items is rejected. The next source milestone is minimal cross-day carry-forward and resolution tracking for validated unanswered questions.
 - [`POLICY_CONTRACT.md`](POLICY_CONTRACT.md) records the schema-v1 field-use matrix and distinguishes runtime controls from fixed or compatibility declarations.
 
+## Phase 2 one-pass quality evaluation
+
+- Version `0.3.0` includes the source-only evaluation infrastructure plus narrow privacy-redaction and manager-critical announcement validation changes found by the first smoke test. The infrastructure-only baseline was `0.2.1` in scope.
+- A publication-safe corpus contains eight synthetic windows covering manager-critical announcements/assignments, answered and unanswered questions, actionable guidance with a limitation, supersession, uncertain field guidance, privacy-sensitive identifier forms, the fabricated migration-topic regression, and an all-nonmaterial window.
+- Two runs per window mean 16 evaluation runs and 16–32 possible Hermes calls. This is an exploratory repeatability check, not a statistical reliability estimate.
+- The evaluator uses the existing validated config/provider builder and one-pass prompt/schema/validator/renderer. Detailed prompts, raw responses, rendered digests, validation details, and logs must remain owner-only outside Git.
+- The approved initial evaluation completed all 16 runs with 19 Hermes calls. It did not meet the quality gates: aggregate required-atom recall was 95%, one resolution-placement expectation was incorrect, and the two privacy prompts exposed one missed synthetic secret form. No known migration fabrication or superseded advice was accepted; both no-material runs failed closed.
+- The expectation defect is corrected. Focused regressions now cover `api_token` redaction and manager-critical technical/engineering administrative status retention. Model-quality acceptance remains pending a separately approved focused rerun plus human artifact review.
+- No-material runs can measure fabrication versus fail-closed rejection only; they do not validate checkpoint behavior without runner/spool coverage.
+- [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md) defines the corpus, rubric, acceptance gates, artifact boundary, and separate infrastructure/model-quality decisions. Historical Ollama authorization in [`EVALUATION_SPEC.md`](EVALUATION_SPEC.md) does not authorize Hermes.
+- [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md) records only sanitized aggregate results, findings, and remediation; detailed model artifacts remain owner-only outside Git.
+
 ## Publication-safe setup
 
 1. Copy `config/digest.policy.example.json` to the ignored `config/digest.policy.json`.

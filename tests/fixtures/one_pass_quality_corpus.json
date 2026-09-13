@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic public one-pass quality corpus. All people, systems, identifiers, URLs, commands, and events are invented.",
+  "coverage": [
+    "important_announcements_and_assignments",
+    "answered_technical_questions",
+    "unanswered_and_limited_guidance",
+    "corrections_and_superseded_advice",
+    "limitations_and_uncertain_field_guidance",
+    "privacy_sensitive_identifier_forms",
+    "fabricated_migration_topic_regression",
+    "all_nonmaterial"
+  ],
+  "windows": [
+    {
+      "id": "administrative_assignment",
+      "material": true,
+      "events": [
+        {"message_id": "admin-date", "change_seq": 1, "timestamp": "2026-09-10T13:00:00+00:00", "display_name": "Coordinator", "text": "The quarterly engineering workshop is confirmed for 18 September."},
+        {"message_id": "admin-lead", "change_seq": 2, "timestamp": "2026-09-10T13:01:00+00:00", "display_name": "Coordinator", "text": "The Platform Team must lead the API reliability session and receive most presentation time."},
+        {"message_id": "admin-deadline", "change_seq": 3, "timestamp": "2026-09-10T13:02:00+00:00", "display_name": "Coordinator", "text": "The Platform Team must submit the demo outline by 16 September."},
+        {"message_id": "admin-volunteer", "change_seq": 4, "timestamp": "2026-09-10T13:03:00+00:00", "display_name": "Coordinator", "text": "Other regional engineers may volunteer for additional examples."},
+        {"message_id": "admin-note", "change_seq": 5, "timestamp": "2026-09-10T13:04:00+00:00", "display_name": "Coordinator", "text": "The room layout will be shared later."}
+      ],
+      "expected": {
+        "required_atoms": ["The quarterly engineering workshop is confirmed for 18 September.", "The Platform Team must lead the API reliability session and receive most presentation time.", "The Platform Team must submit the demo outline by 16 September.", "Other regional engineers may volunteer for additional examples."],
+        "optional_atoms": ["The room layout will be shared later."],
+        "answered_question_ids": [], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "answered_question",
+      "material": true,
+      "events": [
+        {"message_id": "interface-question", "change_seq": 1, "timestamp": "2026-09-10T14:00:00+00:00", "display_name": "Engineer A", "text": "Which CLI command shows the active interface state on NetBox X7?"},
+        {"message_id": "interface-answer", "change_seq": 2, "timestamp": "2026-09-10T14:03:00+00:00", "display_name": "Engineer B", "reply_to": "interface-question", "text": "Use /show/interface/state on NetBox X7."},
+        {"message_id": "interface-doc", "change_seq": 3, "timestamp": "2026-09-10T14:04:00+00:00", "display_name": "Engineer B", "text": "The verified procedure is at https://docs.example.invalid/netbox-x7-interface."}
+      ],
+      "expected": {
+        "required_atoms": ["Which CLI command shows the active interface state on NetBox X7?", "Use /show/interface/state on NetBox X7.", "https://docs.example.invalid/netbox-x7-interface."],
+        "optional_atoms": [],
+        "answered_question_ids": ["interface-question"], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "open_and_limited",
+      "material": true,
+      "events": [
+        {"message_id": "sync-question", "change_seq": 1, "timestamp": "2026-09-10T15:00:00+00:00", "display_name": "Engineer A", "text": "How can we restore API synchronization after the gateway upgrade?"},
+        {"message_id": "sync-guidance", "change_seq": 2, "timestamp": "2026-09-10T15:03:00+00:00", "display_name": "Engineer B", "reply_to": "sync-question", "text": "Restarting the sync worker restores new jobs, but historical jobs remain missing."},
+        {"message_id": "sync-limit", "change_seq": 3, "timestamp": "2026-09-10T15:04:00+00:00", "display_name": "Engineer B", "text": "This workaround is field guidance only because the root cause is not documented."},
+        {"message_id": "archive-question", "change_seq": 4, "timestamp": "2026-09-10T15:10:00+00:00", "display_name": "Engineer C", "text": "Which supported utility exports archived audit records?"}
+      ],
+      "expected": {
+        "required_atoms": ["How can we restore API synchronization after the gateway upgrade?", "Restarting the sync worker restores new jobs, but historical jobs remain missing.", "This workaround is field guidance only because the root cause is not documented.", "Which supported utility exports archived audit records?"],
+        "optional_atoms": [],
+        "answered_question_ids": [], "unanswered_ids": ["archive-question"], "limited_update_question_ids": ["sync-question"],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "correction_chain",
+      "material": true,
+      "events": [
+        {"message_id": "old-path", "change_seq": 1, "timestamp": "2026-09-10T16:00:00+00:00", "display_name": "Engineer A", "text": "For Router Q4, use release 8.2 before upgrading to 9.0."},
+        {"message_id": "path-correction", "change_seq": 2, "timestamp": "2026-09-10T16:03:00+00:00", "display_name": "Engineer A", "text": "Correction: release 8.2 is not supported for this path."},
+        {"message_id": "final-path", "change_seq": 3, "timestamp": "2026-09-10T16:04:00+00:00", "display_name": "Engineer A", "text": "For Router Q4, upgrade directly from 8.1 to 9.0."}
+      ],
+      "expected": {
+        "required_atoms": ["Correction: release 8.2 is not supported for this path.", "For Router Q4, upgrade directly from 8.1 to 9.0."],
+        "optional_atoms": [],
+        "answered_question_ids": [], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": ["For Router Q4, use release 8.2 before upgrading to 9.0."], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "uncertain_field_guidance",
+      "material": true,
+      "events": [
+        {"message_id": "dns-observation", "change_seq": 1, "timestamp": "2026-09-10T17:00:00+00:00", "display_name": "Engineer A", "text": "In two lab checks, clearing the DNS cache appeared to reduce lookup timeouts."},
+        {"message_id": "dns-limit", "change_seq": 2, "timestamp": "2026-09-10T17:02:00+00:00", "display_name": "Engineer A", "text": "This is field guidance; vendor documentation has not confirmed the behavior."},
+        {"message_id": "dns-scope", "change_seq": 3, "timestamp": "2026-09-10T17:03:00+00:00", "display_name": "Engineer A", "text": "The observation was recorded in the lab notes."}
+      ],
+      "expected": {
+        "required_atoms": ["In two lab checks, clearing the DNS cache appeared to reduce lookup timeouts.", "This is field guidance; vendor documentation has not confirmed the behavior."],
+        "optional_atoms": ["The observation was recorded in the lab notes."],
+        "answered_question_ids": [], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "identifier_privacy",
+      "material": true,
+      "events": [
+        {"message_id": "private-assignment", "change_seq": 1, "timestamp": "2026-09-10T18:00:00+00:00", "display_name": "Coordinator", "text": "@15550000001 should prepare the deployment checklist for service R2."},
+        {"message_id": "private-issue", "change_seq": 2, "timestamp": "2026-09-10T18:02:00+00:00", "display_name": "Engineer A", "text": "The API issue still fails on 15550000002:7@s.whatsapp.net; no resolution was established."},
+        {"message_id": "private-route", "change_seq": 3, "timestamp": "2026-09-10T18:03:00+00:00", "display_name": "Coordinator", "text": "Ask 15550000003@lid for logs, then post the follow-up in 15550000004-15550000005@g.us and status@broadcast."},
+        {"message_id": "private-secret", "change_seq": 4, "timestamp": "2026-09-10T18:04:00+00:00", "display_name": "Coordinator", "text": "Use api_token=SYNTHETIC_ONLY_VALUE for the temporary test."}
+      ],
+      "expected": {
+        "required_atoms": ["a participant should prepare the deployment checklist for service R2.", "The API issue still fails on a participant; no resolution was established."],
+        "optional_atoms": ["Ask a participant for logs, then post the follow-up in a participant and a participant."],
+        "answered_question_ids": [], "unanswered_ids": ["private-issue"], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": ["[REDACTED]"], "forbidden_superseded_atoms": [],
+        "privacy_sentinels": ["15550000001", "15550000002", "15550000003", "15550000004", "15550000005", "s.whatsapp.net", "@lid", "@broadcast", "SYNTHETIC_ONLY_VALUE"]
+      }
+    },
+    {
+      "id": "fabricated_migration_topic",
+      "material": true,
+      "events": [
+        {"message_id": "regional-cancel", "change_seq": 1, "timestamp": "2026-09-10T19:00:00+00:00", "display_name": "Coordinator", "text": "The regional reliability call is cancelled."},
+        {"message_id": "slides-action", "change_seq": 2, "timestamp": "2026-09-10T19:01:00+00:00", "display_name": "Coordinator", "text": "Prepare the reliability slides before next week."}
+      ],
+      "expected": {
+        "required_atoms": ["The regional reliability call is cancelled.", "Prepare the reliability slides before next week."],
+        "optional_atoms": [],
+        "answered_question_ids": [], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": ["migration", "workshop"], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    },
+    {
+      "id": "all_nonmaterial",
+      "material": false,
+      "events": [
+        {"message_id": "hello", "change_seq": 1, "timestamp": "2026-09-10T20:00:00+00:00", "display_name": "Engineer A", "text": "Good morning team."},
+        {"message_id": "thanks", "change_seq": 2, "timestamp": "2026-09-10T20:01:00+00:00", "display_name": "Engineer B", "text": "Thanks!"},
+        {"message_id": "coffee", "change_seq": 3, "timestamp": "2026-09-10T20:02:00+00:00", "display_name": "Engineer C", "text": "I like the new office coffee."},
+        {"message_id": "speculation", "change_seq": 4, "timestamp": "2026-09-10T20:03:00+00:00", "display_name": "Engineer A", "text": "Maybe the software could be faster someday."}
+      ],
+      "expected": {
+        "required_atoms": [], "optional_atoms": [],
+        "answered_question_ids": [], "unanswered_ids": [], "limited_update_question_ids": [],
+        "forbidden_unsupported_atoms": [], "forbidden_superseded_atoms": [], "privacy_sentinels": []
+      }
+    }
+  ]
+}

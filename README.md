@@ -20,7 +20,9 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest (current) |
+| `0.3.0` | Phase 2 findings: `api_token` privacy hardening and deterministic accountability for source-authored status changes (current) |
+| `0.2.1` | Synthetic one-pass quality-evaluation corpus, scoring harness, bounded call accounting, and owner-only evidence controls |
+| `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest |
 | `0.1.0` | Collector, spool, two-stage and one-pass pipelines, reviewed-artifact delivery, inert scheduler source |
 
 Versioning rules for this repository:
@@ -33,7 +35,23 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 
 ## Current Version-Controlled Change
 
-**`0.2.0` — Harden actionable digest grounding and unresolved tracking.**
+**`0.3.0` — Apply the first Phase 2 quality findings.**
+
+- The initial 16-run synthetic smoke test used 19 Hermes calls and did not meet the model-quality gates. Sanitized aggregates and remediation are recorded in [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
+- Shared projection redaction now covers `api_token=...`, closing the concrete privacy regression found in both privacy-window prompts.
+- A deterministic recall net requires any declarative, unhedged source statement that something was scheduled, confirmed, moved, postponed, or cancelled to be included or uncertain and assigned to a topic or an unanswered entry. It never dictates particular reader wording, so an over-inclusive match only forces the model to account for the message.
+- The privacy corpus now represents actionable guidance as a normal update and a separately stated unresolved problem as unanswered, matching the current schema contract.
+- Focused post-remediation Hermes reruns and human unsupported-content review remain separately approval-gated; model quality is not yet accepted.
+
+The `0.2.1` evaluation infrastructure included:
+
+- Eight synthetic public windows cover manager-critical assignments, answered and unanswered questions, actionable guidance with a source-backed limitation, supersession, uncertain field guidance, privacy-sensitive identifier forms, the fabricated migration-topic regression, and all-nonmaterial input.
+- Two exploratory runs per window require 16 evaluation runs and 16–32 possible Hermes calls. No Hermes evaluation is authorized merely by this source.
+- Required atoms are manager-critical and gate at zero omissions; optional atom recall is reported separately.
+- Models are constructed through the existing validated configuration/provider path. Detailed prompts, raw responses, rendered digests, and logs stay owner-only outside Git; only sanitized aggregate findings may be published.
+- Evaluation-infrastructure acceptance and model-quality acceptance are separate decisions. See [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md).
+
+The underlying `0.2.0` accuracy and privacy hardening remains in force:
 
 Grounding:
 
@@ -181,6 +199,8 @@ It is better to omit minor discussion than flood the digest with low-value chatt
 - `DEPLOYMENT_GUIDE.md` — staged deployment and rollback boundaries.
 - `RUNBOOK.md` — operational verification and incident procedures.
 - `IMPLEMENTATION_PLAN.md` — historical implementation/evidence map.
+- `ONE_PASS_EVALUATION_SPEC.md` — synthetic one-pass Phase 2 corpus, scoring gates, call budget, and evidence boundary.
+- `ONE_PASS_EVALUATION_FINDINGS.md` — sanitized aggregate Phase 2 results, findings, and remediation status.
 - `DAILY_SCHEDULER_DESIGN.md` — staged production cadence and reviewed-delivery design; no timer is enabled.
 - `config/digest.policy.example.json` — sanitized nondeployable schema example; real policies are ignored.
 

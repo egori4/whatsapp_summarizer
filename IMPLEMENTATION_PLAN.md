@@ -73,11 +73,12 @@ Operational evidence remains owner-only and outside Git. Public evidence must be
 - Model-cited semantic question/issue selection rather than lexical-only detection.
 - Deterministic technical-question/issue checks and exact-source-excerpt grounding for reader-facing one-pass prose.
 - Reviewed-artifact delivery boundary and explicit execution modes.
+- Publication-safe one-pass quality corpus, deterministic scorer, bounded call accounting, owner-only evidence writer, and validated config/provider model construction.
 
 ## Remaining phases
 
-1. **Accept the current accuracy hardening.** Complete independent read-only review, resolve any remaining blocker, and commit only after the source and documentation are accepted.
-2. **Run an isolated quality evaluation.** With separate approval, replay a small set of representative owner-only windows in `render-only` mode. Measure omitted important items, unsupported accepted items, question-resolution classification, and retry rate; commit only sanitized test cases and conclusions. Use those results to define a fail-closed no-material checkpoint contract before unattended operation.
+1. **Accuracy/privacy hardening accepted (complete).** The independent review was accepted and committed as `0.2.0`; Phase 2 does not reopen it without a concrete regression.
+2. **Complete the isolated one-pass quality evaluation.** The initial approved smoke test completed 16 runs with 19 Hermes calls and did not meet the gates. Deterministic remediation now covers the exposed `api_token` projection regression, corrects the limited-guidance corpus expectation, and rejects silent omission of source-authored status changes. A focused rerun and human unsupported-content review remain separately approval-gated. Keep detailed artifacts owner-only and publish only sanitized aggregate findings. Treat no-material results as input to a later checkpoint design, not validation of checkpoint behavior. See [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md) and [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
 3. **Add cross-day resolution state.** Carry validated unanswered items forward by revision-only identity so later source-backed answers can move them from open to partial or resolved without replaying unrelated history.
 4. **Operational acceptance.** Repeat protected configuration preflight and exact-artifact review. Delivery and scheduling remain separate explicit approvals; they are not part of source acceptance.
 

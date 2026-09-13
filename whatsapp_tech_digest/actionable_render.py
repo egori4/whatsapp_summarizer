@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 from .actionable_schema import actionable_schema
 from .actionable_validate import (
     actionable_source_map,
+    announces_status_change,
     clean_field,
     clean_reader_field,
     date_label,
@@ -42,6 +43,12 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
     dispositions = data["dispositions"]
     if not isinstance(dispositions, dict) or set(dispositions) != set(sources) or any(value not in {"INCLUDE", "EXCLUDE", "CONTEXT", "UNCERTAIN"} for value in dispositions.values()):
         raise ModelFailure("missing actionable source disposition")
+    critical_administrative = {
+        reference for reference, source in sources.items()
+        if announces_status_change(source_text(source))
+    }
+    if any(dispositions[reference] not in {"INCLUDE", "UNCERTAIN"} for reference in critical_administrative):
+        raise ModelFailure("source-authored status change cannot be excluded")
     topics = data["topics"]
     unanswered = data["unanswered"]
     if (
@@ -303,6 +310,8 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
         unanswered_blocks.append("\n".join(unanswered_lines))
 
     sections = list(update_blocks)
+    if not critical_administrative <= assigned:
+        raise ModelFailure("source-authored status change must be assigned to a topic or unanswered entry")
     if unanswered_blocks:
         sections.append("Unanswered / incomplete topics\n\n" + "\n\n".join(unanswered_blocks))
     return f"# Technical Updates — {date_label(items)}\n\n" + "\n\n".join(sections)
@@ -369,7 +378,7 @@ def actionable_prompt(items: Sequence[dict[str, Any]], instruction: str = "") ->
         "Always emit actions as a list (use [] when none); preserve every explicit assignee, requested deliverable, optional volunteer path, and stated time/priority allocation without weakening it into a generic suggestion. "
         "Never replace a specifically named person or team with a generic actor, and never turn an optional volunteer path into an exclusion or replacement of the named assignee. If a named team is assigned the majority of presentation time, state that team as the primary presenter and describe any other volunteers as additional; do not say that volunteers exclude the primary team. "
         "[mentioned participant] and [participant identifier] are opaque privacy placeholders, not reader-facing names: replace only either placeholder with the exact phrase 'a participant' inside an otherwise exact source excerpt, and never emit a placeholder or identifier in the digest. "
-        "Before emitting JSON, account for each direct administrative instruction in one source-supported action bullet or explicitly exclude it as non-material. Every question, situation, recommendation, action, and limitation must be copied as one normalized exact excerpt from its declared topic sources after the stated participant-placeholder substitution; do not otherwise paraphrase or combine non-contiguous clauses in one field. Never omit an immediately preceding negator such as not, never, don't, or avoid. Titles may be concise generated labels, but never introduce a program, product, meeting, migration, decision, owner, or follow-up absent from those sources. Preserve every product identifier exactly. When a source supplies versions or environment details that scope an answer, retain that exact source excerpt instead of generalizing the conclusion. When messages describe one program, event, or training initiative, combine its planning, topic selection, presenter nominations, and presentation allocation into one topic even when they arrive as separate messages. "
+        "Before emitting JSON, account for each direct administrative instruction in one source-supported action bullet or explicitly exclude it as non-material. A source that states something was scheduled, confirmed, moved, postponed, or cancelled must be INCLUDE or UNCERTAIN and belong to a topic or an unanswered entry; never drop it silently. Every question, situation, recommendation, action, and limitation must be copied as one normalized exact excerpt from its declared topic sources after the stated participant-placeholder substitution; do not otherwise paraphrase or combine non-contiguous clauses in one field. Never omit an immediately preceding negator such as not, never, don't, or avoid. Titles may be concise generated labels, but never introduce a program, product, meeting, migration, decision, owner, or follow-up absent from those sources. Preserve every product identifier exactly. When a source supplies versions or environment details that scope an answer, retain that exact source excerpt instead of generalizing the conclusion. When messages describe one program, event, or training initiative, combine its planning, topic selection, presenter nominations, and presentation allocation into one topic even when they arrive as separate messages. "
         "Never split a program's schedule/topic announcement from its presenter assignments merely because they appear in separate sources. "
         "Use limitation only for a concrete source-backed constraint, unsupported condition, or missing fact that blocks a conclusion; do not use it for ordinary future publication of agenda, schedule, or detail. "
         "Never recast an announcement, instruction, status, or directive as a question. Keep related administrative planning, topic selection, presenter nominations, and assignments from the same announcement/thread in one topic instead of splitting them. "
@@ -408,10 +417,3 @@ def summarize_actionable(selected: Sequence[dict[str, Any]], final_model: LocalM
             failures.append(f"{type(exc).__name__}: {detail or 'validation failed'}")
             repair_instruction = _repair_instruction(exc)
     raise ModelFailure(f"both actionable final attempts failed ({' | '.join(failures)}); checkpoint must not advance")
-
-
-def _has_technical_signal(text: str) -> bool:
-    return re.search(
-        r"\b(?:tool|utility|version|release|upgrad\w*|migration|configuration|config|policy|command|api|service|system|software|hardware|network|feature|capability|support|cli|script|log|error|issue|problem|bug|cve|ddos|waf|attack|traffic|packet|rule|signature|license|account|certificate|port|dns|ip|url|repository|repo|github|server|device|platform|product|appliance|interface|deployment|deploy|rollback)\b",
-        " ".join(text.split()).casefold(),
-    ) is not None

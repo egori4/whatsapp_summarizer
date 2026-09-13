@@ -274,6 +274,176 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("Asked by:", rendered)
         self.assertNotIn("Contributors:", rendered)
 
+    def test_manager_critical_cancellation_cannot_be_silently_excluded(self):
+        sources = [
+            {
+                "message_id": "regional-cancel", "change_seq": 1,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "The regional reliability call is cancelled.",
+            },
+            {
+                "message_id": "slides-action", "change_seq": 2,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:01:00+00:00",
+                "text": "Prepare the reliability slides before next week.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "EXCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Reliability slides", "title": "Reliability slides",
+                "source_refs": ["S002"], "raw_keep_refs": ["S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "",
+                "actions": ["Prepare the reliability slides before next week."],
+                "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "status change"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_unanswered_administrative_question_is_not_forced_into_an_update(self):
+        sources = [
+            {
+                "message_id": "schedule-question", "change_seq": 1,
+                "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "Anyone know if the API training session is still scheduled for Friday?",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [],
+            "unanswered": [{
+                "topic": "Training schedule", "question_source_ref": "S001",
+                "question_source_kind": "QUESTION", "context_refs": [],
+                "reason": "No answer was given.",
+            }],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("Anyone know if the API training session is still scheduled for Friday?", rendered)
+
+    def test_speculative_administrative_chatter_may_be_excluded(self):
+        sources = [
+            {
+                "message_id": "rumour", "change_seq": 1,
+                "display_name": "Engineer A", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "Maybe the maintenance window got rescheduled again, who knows.",
+            },
+            {
+                "message_id": "slides-action", "change_seq": 2,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:01:00+00:00",
+                "text": "Prepare the reliability slides before next week.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "EXCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Reliability slides", "title": "Reliability slides",
+                "source_refs": ["S002"], "raw_keep_refs": ["S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "",
+                "actions": ["Prepare the reliability slides before next week."],
+                "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("Prepare the reliability slides before next week.", rendered)
+
+    def test_manager_critical_clause_survives_unrelated_trailing_chatter(self):
+        sources = [
+            {
+                "message_id": "deadline", "change_seq": 1,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "Our deployment review meeting is confirmed, by the way the coffee machine is broken.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Deployment review", "title": "Deployment review",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "Our deployment review meeting is confirmed", "recommendation": "",
+                "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("Our deployment review meeting is confirmed", rendered)
+        self.assertNotIn("coffee machine", rendered)
+
+    def test_status_change_is_retained_without_requiring_verbatim_quotation(self):
+        sources = [
+            {
+                "message_id": "regional-cancel", "change_seq": 1,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "The regional reliability call is cancelled.",
+            },
+            {
+                "message_id": "slides-action", "change_seq": 2,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:01:00+00:00",
+                "text": "Prepare the reliability slides before next week.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Reliability slides", "title": "Reliability slides",
+                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S001", "S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "",
+                "actions": ["Prepare the reliability slides before next week."],
+                "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+
+        self.assertIn("Prepare the reliability slides before next week.", rendered)
+
+    def test_status_change_outside_the_technical_vocabulary_cannot_be_excluded(self):
+        sources = [
+            {
+                "message_id": "standup-cancel", "change_seq": 1,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:00:00+00:00",
+                "text": "The Friday standup is cancelled.",
+            },
+            {
+                "message_id": "slides-action", "change_seq": 2,
+                "display_name": "Coordinator", "timestamp": "2026-09-01T13:01:00+00:00",
+                "text": "Prepare the reliability slides before next week.",
+            },
+        ]
+        response = {
+            "dispositions": {"S001": "EXCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Reliability slides", "title": "Reliability slides",
+                "source_refs": ["S002"], "raw_keep_refs": ["S002"],
+                "question": "", "question_source_ref": None, "question_source_kind": None,
+                "situation": "", "recommendation": "",
+                "actions": ["Prepare the reliability slides before next week."],
+                "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "status change"):
+            render_actionable(json.dumps(response), sources)
+
     def test_reader_omits_redundant_field_guidance_and_reference_identifier(self):
         response = self.response()
         response["topics"][0]["specifics"] = [{"source_ref": "S003", "value": "1136675"}]
