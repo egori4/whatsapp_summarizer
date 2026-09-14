@@ -30,8 +30,9 @@ Each material window declares two atom classes:
 
 Resolution expectations use only the current schema:
 
-- answered questions belong to normal topics;
-- actionable but incomplete guidance belongs to a normal topic with a source-backed `limitation`;
+- answered questions and resolved declarative issues belong to normal topics with explicit `resolution_status: resolved`, including complete answers that also state a limitation;
+- actionable but incomplete guidance belongs to a normal topic with explicit `resolution_status: partial` and a source-backed remaining gap in `limitation`;
+- a normal `resolved` or `partial` topic must ground reader-facing answer evidence in an included source distinct from the tracked question/issue; only an edited tracked `UPDATE` may supply its own resolution;
 - only questions or issues without reusable guidance belong in `unanswered`.
 
 ## Run count and interpretation
@@ -45,7 +46,7 @@ Evaluate each window twice: **16 evaluation runs**, requiring **16–32 Hermes m
 | Manager-critical required-atom omission rate | `0%` |
 | Optional-atom recall | Report only |
 | Unsupported accepted content | `0` |
-| Answered/update-with-limitation/unanswered classification errors | `0` |
+| Resolved/partial/unanswered classification errors | `0` |
 | Privacy leaks in any projected prompt or accepted output | `0` |
 | Supersession error count | `0` |
 | Material-window final failure rate | `0%` |

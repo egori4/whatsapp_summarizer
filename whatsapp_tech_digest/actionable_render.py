@@ -11,6 +11,7 @@ from .actionable_validate import (
     clean_field,
     clean_reader_field,
     date_label,
+    grounded_reader_text,
     low_confidence,
     names,
     protected_value_occurs,
@@ -64,7 +65,8 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
     update_blocks: list[str] = []
     expected_topic_keys = {
         "topic", "title", "source_refs", "raw_keep_refs", "situation",
-        "question", "question_source_ref", "question_source_kind", "recommendation", "actions", "specifics", "limitation", "reference_refs", "confidence",
+        "question", "question_source_ref", "question_source_kind", "resolution_status",
+        "recommendation", "actions", "specifics", "limitation", "reference_refs", "confidence",
     }
     seen_topics: set[str] = set()
     for entry in topics:
@@ -109,23 +111,43 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
         thread_set = set(thread_refs)
         question_source_ref = entry["question_source_ref"]
         question_source_kind = entry["question_source_kind"]
+        resolution_status = entry["resolution_status"]
         if question_source_ref is not None and question_source_ref not in thread_set:
             raise ModelFailure("question source ref must belong to its topic")
+        if question_source_ref is not None and dispositions[question_source_ref] not in {"INCLUDE", "UNCERTAIN"}:
+            raise ModelFailure("tracked source must be included or uncertain")
         if question:
             if not question_source_ref:
                 raise ModelFailure("question must cite a source with semantic kind QUESTION")
             if question_source_kind != "QUESTION":
                 raise ModelFailure("question source must have semantic kind QUESTION")
-            if dispositions[question_source_ref] not in {"INCLUDE", "UNCERTAIN"}:
-                raise ModelFailure("question source must be included or uncertain")
             question_source = safe_reader_source_text(
                 source_text(sources[question_source_ref]), "question source"
             )
             if not _is_technical_question(question_source) or not _is_technical_question(question):
                 raise ModelFailure("question source is not question-like")
             require_grounded_reader_text(question, question_source, "question")
-        elif question_source_ref is not None or question_source_kind is not None:
-            raise ModelFailure("empty question must not cite a semantic source")
+        elif question_source_ref is not None:
+            tracked_source = source_text(sources[question_source_ref])
+            if question_source_kind == "ISSUE":
+                if not _is_unresolved_technical_issue(tracked_source):
+                    raise ModelFailure("tracked issue source is not an unresolved technical issue")
+            elif question_source_kind == "UPDATE":
+                if sources[question_source_ref].get("change_type") != "edit":
+                    raise ModelFailure("tracked update source must be an edited revision")
+                if _is_technical_question(tracked_source) or _is_unresolved_technical_issue(tracked_source):
+                    raise ModelFailure("tracked update remains an unresolved question or issue")
+            else:
+                raise ModelFailure("empty question may cite only a tracked issue or edited update")
+        elif question_source_kind is not None:
+            raise ModelFailure("empty question must not declare a semantic source kind")
+        if question_source_ref is None:
+            if resolution_status is not None:
+                raise ModelFailure("resolution status requires a tracked source")
+        elif resolution_status not in {"partial", "resolved"}:
+            raise ModelFailure("tracked source requires explicit partial or resolved status")
+        if resolution_status == "partial" and not limitation:
+            raise ModelFailure("partial resolution requires a source-backed limitation")
         question_refs = [question_source_ref] if question_source_ref else []
         if assigned & thread_set or any(dispositions[ref] == "EXCLUDE" for ref in thread_set):
             raise ModelFailure("source belongs to multiple topics or an excluded topic")
@@ -165,6 +187,7 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
             raise ModelFailure("low-confidence topic must be labeled or limited")
 
         specific_values: list[str] = []
+        rendered_specific_refs: set[str] = set()
         for specific in specifics:
             reference = specific["source_ref"]
             value = clean_reader_field(specific["value"], "specific value", required=True)
@@ -184,6 +207,8 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
                 canonical_values = sorted(protected, key=source.index)
             else:
                 canonical_values = []
+            if canonical_values:
+                rendered_specific_refs.add(reference)
             for canonical in canonical_values:
                 if canonical not in specific_values:
                     specific_values.append(canonical)
@@ -206,6 +231,25 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
                 require_grounded_reader_text(value, topic_source_texts, field)
         for action in actions:
             require_grounded_reader_text(action, topic_source_texts, "action")
+
+        if question_source_ref is not None and question_source_kind != "UPDATE":
+            if not contributor_refs:
+                raise ModelFailure("tracked resolution requires distinct answer evidence")
+            contributor_source_texts = [
+                safe_reader_source_text(source_text(sources[ref]), "answer source")
+                for ref in contributor_refs
+            ]
+            has_reader_answer_evidence = any(
+                grounded_reader_text(value, contributor_source_texts)
+                for value in (situation, recommendation, *actions, limitation)
+                if value
+            ) or any(
+                reference in contributor_refs for reference in rendered_specific_refs
+            ) or any(
+                reference in contributor_refs for reference in reference_refs
+            )
+            if not has_reader_answer_evidence:
+                raise ModelFailure("tracked resolution requires reader-facing evidence from a distinct answer source")
 
         update_lines = [f"## {title}"]
         if question:
@@ -347,10 +391,11 @@ def actionable_provenance(response: str, items: Sequence[dict[str, Any]]) -> dic
             "raw_keep_revisions": _provenance_revisions(entry["raw_keep_refs"], sources),
             "reference_revisions": _provenance_revisions(entry["reference_refs"], sources),
             "question_revisions": _provenance_revisions(question_refs, sources),
+            "question_resolution": entry["resolution_status"],
             "contributor_revisions": _provenance_revisions(contributor_refs, sources),
         })
     return {
-        "schema_version": "actionable-provenance-v1",
+        "schema_version": "actionable-provenance-v2",
         "topics": topics,
         "unanswered": [
             {
@@ -374,7 +419,7 @@ def actionable_prompt(items: Sequence[dict[str, Any]], instruction: str = "") ->
         "80–95% message reduction. Within each thread, resolve corrections and superseded suggestions before writing the final conclusion; "
         "exclude greetings, thanks, simple confirmations, repeated quotes, social content, customer-only detail, rejected suggestions, and "
         "unconfirmed speculation. Use raw_keep_refs only for original messages carrying the final useful knowledge, never filler; they are audit "
-        "metadata and will not be reader-facing. Semantically classify every reader-facing question source as QUESTION and every unresolved issue source as ISSUE. Populate question only for a source-authored technical question or request; copy one exact normalized source excerpt and set question_source_ref to that exact source with question_source_kind QUESTION. Otherwise set question, question_source_ref, and question_source_kind to empty/null. For unanswered entries, set question_source_kind to QUESTION or ISSUE according to the source's semantic meaning. The unanswered topic is internal grouping metadata and is never rendered; reason is internal status metadata and the reader status is derived locally. The unanswered question_source_ref and context_refs must be distinct: context_refs must never include question_source_ref, and every unanswered reference must have disposition INCLUDE or UNCERTAIN. topics may be [] when the window contains only valid unanswered technical questions/issues, but topics and unanswered must not both be empty. Direct requests, assignments, nominations, deadlines, and priority/allocation instructions belong in actions instead. "
+        "metadata and will not be reader-facing. A source marked tracked_item is an accepted open or partial item from prior state and must remain unanswered or be cited by a source-backed partial/resolved topic. Semantically classify every reader-facing question source as QUESTION and every unresolved issue source as ISSUE. Populate question only for a source-authored technical question or request; copy one exact normalized source excerpt and set question_source_ref to that exact source with question_source_kind QUESTION. When a topic resolves a declarative problem statement, leave question empty and cite that source with question_source_kind ISSUE. When a tracked source marked revision_kind edit itself supplies the resolution, use question_source_kind UPDATE. Set resolution_status to partial or resolved for every topic with question_source_ref, and null when there is no question_source_ref. Except for an edited UPDATE that itself supplies the resolution, every partial/resolved topic must include a distinct included answer source and at least one reader-facing situation, recommendation, action, limitation, rendered specific, or reference grounded in that answer source. A concrete limitation can be part of a complete answer, so mark partial only when the stated question or problem still lacks a requested conclusion; every partial topic must include the source-backed missing constraint in limitation. For unanswered entries, set question_source_kind to QUESTION or ISSUE according to the source's semantic meaning. The unanswered topic is internal grouping metadata and is never rendered; reason is internal status metadata and the reader status is derived locally. The unanswered question_source_ref and context_refs must be distinct: context_refs must never include question_source_ref, and every unanswered reference must have disposition INCLUDE or UNCERTAIN. topics may be [] when the window contains only valid unanswered technical questions/issues, but topics and unanswered must not both be empty. Direct requests, assignments, nominations, deadlines, and priority/allocation instructions belong in actions instead. "
         "Always emit actions as a list (use [] when none); preserve every explicit assignee, requested deliverable, optional volunteer path, and stated time/priority allocation without weakening it into a generic suggestion. "
         "Never replace a specifically named person or team with a generic actor, and never turn an optional volunteer path into an exclusion or replacement of the named assignee. If a named team is assigned the majority of presentation time, state that team as the primary presenter and describe any other volunteers as additional; do not say that volunteers exclude the primary team. "
         "[mentioned participant] and [participant identifier] are opaque privacy placeholders, not reader-facing names: replace only either placeholder with the exact phrase 'a participant' inside an otherwise exact source excerpt, and never emit a placeholder or identifier in the digest. "

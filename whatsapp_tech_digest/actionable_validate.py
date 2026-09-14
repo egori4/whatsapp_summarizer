@@ -116,23 +116,24 @@ def clean_reader_field(value: object, field: str, *, required: bool = False) -> 
     return cleaned
 
 
-def require_grounded_reader_text(value: str, evidence: str | Sequence[str], field: str) -> None:
-    """Require substantive reader prose to be an exact normalized source excerpt."""
+def grounded_reader_text(value: str, evidence: str | Sequence[str]) -> bool:
+    """Return whether reader prose is an exact normalized source excerpt."""
     normalized_value = " ".join(value.split())
     evidence_items = (evidence,) if isinstance(evidence, str) else evidence
     pattern = re.compile(r"(?<!\w)" + re.escape(normalized_value) + r"(?!\w)")
-    supported = False
     for item in evidence_items:
         normalized_evidence = " ".join(item.split())
         for match in pattern.finditer(normalized_evidence):
             prefix = normalized_evidence[:match.start()]
             if re.search(r"(?i)\b(?:not|never|don't|don’t|avoid)\s*$", prefix):
                 continue
-            supported = True
-            break
-        if supported:
-            break
-    if normalized_value and not supported:
+            return True
+    return not normalized_value
+
+
+def require_grounded_reader_text(value: str, evidence: str | Sequence[str], field: str) -> None:
+    """Require substantive reader prose to be an exact normalized source excerpt."""
+    if not grounded_reader_text(value, evidence):
         raise ModelFailure(f"unsupported {field}: not an exact source excerpt")
 
 
@@ -171,12 +172,23 @@ def parse_time(value: object) -> datetime | None:
 
 def date_label(items: Sequence[dict[str, Any]]) -> str:
     dates = []
+    carried_window_dates = []
     for item in items:
+        if item.get("carried_forward") is True:
+            for value in item.get("digest_window_timestamps") or []:
+                parsed = parse_time(value)
+                if parsed is not None:
+                    if parsed.tzinfo is not None:
+                        parsed = parsed.astimezone(ZoneInfo("America/Toronto"))
+                    carried_window_dates.append(parsed.date())
+            continue
         parsed = parse_time(item.get("timestamp"))
         if parsed is not None:
             if parsed.tzinfo is not None:
                 parsed = parsed.astimezone(ZoneInfo("America/Toronto"))
             dates.append(parsed.date())
+    if not dates:
+        dates = carried_window_dates
     if not dates:
         return "Undated"
     first, last = min(dates), max(dates)

@@ -74,12 +74,14 @@ Operational evidence remains owner-only and outside Git. Public evidence must be
 - Deterministic technical-question/issue checks and exact-source-excerpt grounding for reader-facing one-pass prose.
 - Reviewed-artifact delivery boundary and explicit execution modes.
 - Publication-safe one-pass quality corpus, deterministic scorer, bounded call accounting, owner-only evidence writer, and validated config/provider model construction.
+- Stable-message/current-revision cross-day state for unanswered questions and declarative issues, with explicit open, partial, and resolved transitions, distinct answer-evidence enforcement, edit/revocation handling, and atomic retention cleanup.
+- A fully synthetic three-day semantic pilot covering limitation fidelity, version scope, unresolved retention, acknowledgement removal, source-only topics, readable titles, and current-window date labels.
 
 ## Remaining phases
 
 1. **Accuracy/privacy hardening accepted (complete).** The independent review was accepted and committed as `0.2.0`; Phase 2 does not reopen it without a concrete regression.
 2. **Complete the isolated one-pass quality evaluation.** The initial approved smoke test completed 16 runs with 19 Hermes calls and did not meet the gates. Deterministic remediation now covers the exposed `api_token` projection regression, corrects the limited-guidance corpus expectation, and rejects silent omission of source-authored status changes. A focused rerun and human unsupported-content review remain separately approval-gated. Keep detailed artifacts owner-only and publish only sanitized aggregate findings. Treat no-material results as input to a later checkpoint design, not validation of checkpoint behavior. See [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md) and [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
-3. **Add cross-day resolution state.** Carry validated unanswered items forward by revision-only identity so later source-backed answers can move them from open to partial or resolved without replaying unrelated history.
+3. **Add cross-day resolution state (implementation complete; re-review pending).** Accepted unanswered questions and declarative issues are carried by stable message identity and current revision into later nonempty windows. Edits remain tracked, revocations release retention, normal resolution requires distinct answer evidence, explicit source-backed completeness drives partial/resolved state, and silent or safety-filtered omission fails before model construction or output. Follow-up review defects have regression coverage; final independent source re-review remains before commit.
 4. **Operational acceptance.** Repeat protected configuration preflight and exact-artifact review. Delivery and scheduling remain separate explicit approvals; they are not part of source acceptance.
 
 ## Future changes

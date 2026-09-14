@@ -24,13 +24,13 @@ POLICY = ROOT / "config" / "one_pass_evaluation.policy.example.json"
 
 
 class OnePassQualityEvaluationTests(unittest.TestCase):
-    def test_phase_two_behavior_version_is_consistent(self) -> None:
+    def test_current_behavior_version_is_consistent(self) -> None:
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         package = (ROOT / "whatsapp_tech_digest" / "__init__.py").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertRegex(project, r'(?m)^version = "0\.3\.0"$')
-        self.assertRegex(package, r'(?m)^__version__ = "0\.3\.0"$')
-        self.assertIsNotNone(re.search(r"\| `0\.3\.0` \|.*\(current\)", readme))
+        self.assertRegex(project, r'(?m)^version = "0\.4\.0"$')
+        self.assertRegex(package, r'(?m)^__version__ = "0\.4\.0"$')
+        self.assertIsNotNone(re.search(r"\| `0\.4\.0` \|.*\(current\)", readme))
 
     def test_corpus_has_eight_synthetic_windows_and_declared_coverage(self) -> None:
         corpus = load_corpus(CORPUS)
@@ -89,7 +89,7 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
                 "recommendation": "Restarting the sync worker restores new jobs, but historical jobs remain missing.",
                 "actions": [], "specifics": [],
                 "limitation": "This workaround is field guidance only because the root cause is not documented.",
-                "reference_refs": [], "confidence": "field_guidance",
+                "reference_refs": [], "resolution_status": "partial", "confidence": "field_guidance",
             }],
             "unanswered": [{
                 "topic": "Archive export", "question_source_ref": "S004",
@@ -260,7 +260,7 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
                 "situation": "", "recommendation": "Use /show/interface/state on NetBox X7.",
                 "actions": [],
                 "specifics": [{"source_ref": "S002", "value": "/show/interface/state"}],
-                "limitation": "", "reference_refs": ["S003"], "confidence": "documented",
+                "limitation": "", "reference_refs": ["S003"], "resolution_status": "resolved", "confidence": "documented",
             }],
             "unanswered": [],
         })

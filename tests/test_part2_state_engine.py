@@ -39,6 +39,17 @@ def provenance(message_id: str = "a", change_seq: int = 1) -> dict[str, object]:
     }
 
 
+def unanswered_provenance(message_id: str = "question", change_seq: int = 1) -> dict[str, object]:
+    return {
+        "schema_version": "actionable-provenance-v1",
+        "topics": [],
+        "unanswered": [{
+            "question_revision": [message_id, change_seq],
+            "context_revisions": [],
+        }],
+    }
+
+
 class Part2StateEngineTests(unittest.TestCase):
     def spool(self) -> DurableSpool:
         directory = tempfile.TemporaryDirectory()
@@ -84,6 +95,309 @@ class Part2StateEngineTests(unittest.TestCase):
         self.addCleanup(reopened.connection.close)
         self.assertEqual(reopened.messages()[0]["message_id"], "a")
         self.assertIsNotNone(reopened.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='digest_provenance'").fetchone())
+
+    def test_existing_spool_is_upgraded_with_cross_day_question_state(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state" / "spool.sqlite3"
+        spool = DurableSpool(path, TARGET)
+        spool.connection.execute("DROP TABLE open_questions")
+        spool.connection.close()
+
+        reopened = DurableSpool(path, TARGET)
+        self.addCleanup(reopened.connection.close)
+
+        self.assertIsNotNone(reopened.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='open_questions'"
+        ).fetchone())
+
+    def test_revision_keyed_question_state_is_migrated_to_stable_message_identity(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state" / "spool.sqlite3"
+        spool = DurableSpool(path, TARGET)
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        digest_id = spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.connection.executescript("""
+            ALTER TABLE open_questions RENAME TO stable_open_questions;
+            CREATE TABLE open_questions (
+              question_change_seq INTEGER PRIMARY KEY, message_id TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('open','partial','resolved')),
+              opened_digest_id TEXT NOT NULL, updated_digest_id TEXT NOT NULL
+            );
+            INSERT INTO open_questions(question_change_seq,message_id,status,opened_digest_id,updated_digest_id)
+            SELECT question_change_seq,message_id,status,opened_digest_id,updated_digest_id
+              FROM stable_open_questions;
+            DROP TABLE stable_open_questions;
+        """)
+        spool.close()
+
+        reopened = DurableSpool(path, TARGET)
+        self.addCleanup(reopened.close)
+
+        primary_key = next(
+            row["name"] for row in reopened.connection.execute("PRAGMA table_info(open_questions)")
+            if row["pk"]
+        )
+        self.assertEqual(primary_key, "message_id")
+        self.assertEqual(reopened.question_states()[0]["opened_digest_id"], digest_id)
+        self.assertEqual([item["message_id"] for item in reopened.carry_forward_events(reopened.snapshot())], ["question"])
+
+    def test_target_boundary_is_checked_before_question_state_migration(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state" / "spool.sqlite3"
+        path.parent.mkdir(parents=True)
+        connection = sqlite3.connect(path)
+        connection.executescript("""
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO metadata VALUES ('target_group_jid', '20000000-00000003@g.us');
+            CREATE TABLE messages (
+              message_id TEXT PRIMARY KEY, chat_jid TEXT NOT NULL, ingest_seq INTEGER NOT NULL UNIQUE,
+              current_change_seq INTEGER NOT NULL UNIQUE, occurred_at TEXT NOT NULL, committed_at TEXT NOT NULL,
+              participant TEXT NOT NULL, display_name TEXT, current_text TEXT, tombstone INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE open_questions (
+              question_change_seq INTEGER PRIMARY KEY, message_id TEXT NOT NULL,
+              status TEXT NOT NULL, opened_digest_id TEXT NOT NULL, updated_digest_id TEXT NOT NULL
+            );
+        """)
+        connection.close()
+
+        with self.assertRaisesRegex(ValueError, "different target"):
+            DurableSpool(path, TARGET)
+
+        inspection = sqlite3.connect(path)
+        self.addCleanup(inspection.close)
+        primary_key = next(
+            row[1] for row in inspection.execute("PRAGMA table_info(open_questions)") if row[5]
+        )
+        self.assertEqual(primary_key, "question_change_seq")
+
+    def test_accepted_unanswered_question_is_carried_and_later_resolved(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does the deployment tool support release R2?"})
+        first_snapshot = spool.snapshot()
+        first_digest = spool.record_run(
+            first_snapshot,
+            "first-run",
+            "accepted",
+            output="Unanswered technical question.",
+            source_count=1,
+            provenance=unanswered_provenance(),
+        )
+
+        self.assertEqual(spool.question_states(), [{
+            "message_id": "question",
+            "change_seq": 1,
+            "status": "open",
+            "opened_digest_id": first_digest,
+            "updated_digest_id": first_digest,
+        }])
+
+        spool.append_message({
+            **event("answer"),
+            "timestamp": "2026-09-02T12:00:00+00:00",
+            "text": "Release R2 is supported by the deployment tool.",
+        })
+        second_snapshot = spool.snapshot()
+        pending, _, _ = spool.pending_events(second_snapshot)
+        carried = spool.carry_forward_events(second_snapshot)
+
+        self.assertEqual([item["message_id"] for item in pending], ["answer"])
+        self.assertEqual([item["message_id"] for item in carried], ["question"])
+        self.assertEqual(carried[0]["change_seq"], 1)
+
+        resolved = provenance("answer", 2)
+        resolved["topics"][0]["source_revisions"] = [["question", 1], ["answer", 2]]
+        resolved["topics"][0]["raw_keep_revisions"] = [["answer", 2]]
+        resolved["topics"][0]["question_revisions"] = [["question", 1]]
+        second_digest = spool.record_run(
+            second_snapshot,
+            "normal",
+            "accepted",
+            output="Source-backed answer.",
+            source_count=2,
+            provenance=resolved,
+        )
+
+        self.assertEqual(spool.question_states(), [{
+            "message_id": "question",
+            "change_seq": 1,
+            "status": "resolved",
+            "opened_digest_id": first_digest,
+            "updated_digest_id": second_digest,
+        }])
+        self.assertEqual(spool.carry_forward_events(spool.snapshot()), [])
+
+    def test_accepted_candidate_must_account_for_each_carried_question(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does the deployment tool support release R2?"})
+        spool.record_run(
+            spool.snapshot(),
+            "first-run",
+            "accepted",
+            output="Unanswered technical question.",
+            provenance=unanswered_provenance(),
+        )
+        spool.append_message(event("unrelated"))
+
+        with self.assertRaisesRegex(DeliveryBlockedError, "carried question"):
+            spool.record_run(
+                spool.snapshot(),
+                "normal",
+                "accepted",
+                output="Unrelated update.",
+                provenance=provenance("unrelated", 2),
+            )
+
+    def test_limited_cross_day_answer_remains_partial_and_carries_forward(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does the deployment tool support release R2?"})
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("workaround"), "text": "Release R2 works only with manual validation."})
+        payload = provenance("workaround", 2)
+        payload["schema_version"] = "actionable-provenance-v2"
+        payload["topics"][0]["source_revisions"] = [["question", 1], ["workaround", 2]]
+        payload["topics"][0]["question_revisions"] = [["question", 1]]
+        payload["topics"][0]["contributor_revisions"] = [["workaround", 2]]
+        payload["topics"][0]["question_resolution"] = "partial"
+        spool.record_run(
+            spool.snapshot(), "normal", "accepted",
+            output="Limited source-backed answer.", provenance=payload,
+        )
+
+        self.assertEqual(spool.question_states()[0]["status"], "partial")
+        self.assertEqual(
+            [item["message_id"] for item in spool.carry_forward_events(spool.snapshot())],
+            ["question"],
+        )
+
+    def test_edit_rebinds_open_state_and_cannot_be_silently_omitted(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("question"), "text": "Does release R2 support compact import?"})
+        spool.append_message(event("unrelated"))
+
+        self.assertEqual(
+            [(item["message_id"], item["change_seq"]) for item in spool.carry_forward_events(spool.snapshot())],
+            [("question", 2)],
+        )
+        with self.assertRaisesRegex(DeliveryBlockedError, "carried question"):
+            spool.record_run(
+                spool.snapshot(), "normal", "accepted", output="Unrelated update.",
+                provenance=provenance("unrelated", 3),
+            )
+
+    def test_revocation_closes_open_state_and_releases_raw_retention(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("question"), "text": None, "revoked": True})
+        spool.record_run(spool.snapshot(), "normal", "empty")
+        old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        spool.connection.execute("UPDATE message_versions SET committed_at=?", (old,))
+
+        raw, _ = spool.purge(datetime.now(timezone.utc))
+
+        self.assertEqual(raw, 2)
+        self.assertEqual(spool.question_states(), [])
+        self.assertEqual(spool.events_up_to(2), [])
+
+    def test_accepted_reconciliation_tracks_the_current_edited_revision(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        snapshot = spool.snapshot()
+        digest_id = spool.record_run(
+            snapshot, "first-run", "unknown", output="Unanswered technical question.",
+            provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("question"), "text": "Does release R2 support compact import?"})
+
+        spool.reconcile_delivery(digest_id, "accepted")
+
+        self.assertEqual(spool.question_states()[0]["change_seq"], 2)
+        self.assertEqual(
+            [(item["message_id"], item["change_seq"]) for item in spool.carry_forward_events(spool.snapshot())],
+            [("question", 2)],
+        )
+
+    def test_accepted_reconciliation_does_not_reopen_a_revoked_question(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        digest_id = spool.record_run(
+            spool.snapshot(), "first-run", "unknown", output="Unanswered technical question.",
+            provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("question"), "text": None, "revoked": True})
+
+        spool.reconcile_delivery(digest_id, "accepted")
+
+        self.assertEqual(spool.question_states(), [])
+
+    def test_accepted_reconciliation_does_not_resolve_from_revoked_answer_evidence(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("answer"), "text": "Release R2 supports import."})
+        payload = provenance("answer", 2)
+        payload["schema_version"] = "actionable-provenance-v2"
+        payload["topics"][0]["source_revisions"] = [["question", 1], ["answer", 2]]
+        payload["topics"][0]["question_revisions"] = [["question", 1]]
+        payload["topics"][0]["contributor_revisions"] = [["answer", 2]]
+        payload["topics"][0]["question_resolution"] = "resolved"
+        digest_id = spool.record_run(
+            spool.snapshot(), "normal", "unknown",
+            output="Source-backed answer.", provenance=payload,
+        )
+        spool.append_message({**event("answer"), "text": None, "revoked": True})
+
+        spool.reconcile_delivery(digest_id, "accepted")
+
+        self.assertEqual(spool.question_states()[0]["status"], "open")
+
+    def test_v2_provenance_rejects_self_resolution_except_for_an_edited_update(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        self_resolution = provenance("question", 1)
+        self_resolution["schema_version"] = "actionable-provenance-v2"
+        self_resolution["topics"][0]["question_revisions"] = [["question", 1]]
+        self_resolution["topics"][0]["question_resolution"] = "resolved"
+
+        with self.assertRaisesRegex(ValueError, "distinct answer revision"):
+            spool.validate_provenance(spool.snapshot(), self_resolution)
+
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("question"), "text": "Release R2 supports import."})
+        edited_update = provenance("question", 2)
+        edited_update["schema_version"] = "actionable-provenance-v2"
+        edited_update["topics"][0]["question_revisions"] = [["question", 2]]
+        edited_update["topics"][0]["question_resolution"] = "resolved"
+
+        spool.record_run(
+            spool.snapshot(), "normal", "accepted",
+            output="Edited source supplies the answer.", provenance=edited_update,
+        )
+        self.assertEqual(spool.question_states()[0]["status"], "resolved")
 
     def test_validated_digest_persists_hashed_revision_only_provenance(self) -> None:
         spool = self.spool()
@@ -146,6 +460,39 @@ class Part2StateEngineTests(unittest.TestCase):
         self.assertEqual(raw, 0)
         self.assertEqual([row["message_id"] for row in spool.events_up_to(1)], ["a"])
         self.assertEqual(spool.snapshot()["checkpoint_seq"], 0)
+
+    def test_purge_rolls_back_all_retention_changes_on_failure(self) -> None:
+        spool = self.spool()
+        spool.append_message({**event("question"), "text": "Does release R2 support import?"})
+        spool.record_run(
+            spool.snapshot(), "first-run", "accepted",
+            output="Unanswered technical question.", provenance=unanswered_provenance(),
+        )
+        spool.append_message({**event("answer"), "text": "Release R2 supports import."})
+        payload = provenance("answer", 2)
+        payload["schema_version"] = "actionable-provenance-v2"
+        payload["topics"][0]["source_revisions"] = [["question", 1], ["answer", 2]]
+        payload["topics"][0]["question_revisions"] = [["question", 1]]
+        payload["topics"][0]["contributor_revisions"] = [["answer", 2]]
+        payload["topics"][0]["question_resolution"] = "resolved"
+        spool.record_run(
+            spool.snapshot(), "normal", "accepted",
+            output="Source-backed answer.", provenance=payload,
+        )
+        old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        spool.connection.execute("UPDATE message_versions SET committed_at=?", (old,))
+        spool.connection.executescript("""
+            CREATE TRIGGER fail_resolved_cleanup BEFORE DELETE ON open_questions
+            BEGIN SELECT RAISE(ABORT, 'synthetic cleanup failure'); END;
+        """)
+
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "synthetic cleanup failure"):
+            spool.purge(datetime.now(timezone.utc))
+
+        self.assertEqual(
+            spool.connection.execute("SELECT COUNT(*) FROM message_versions").fetchone()[0],
+            2,
+        )
 
     def test_omitted_durable_changes_cannot_advance_checkpoint(self) -> None:
         spool = self.spool()

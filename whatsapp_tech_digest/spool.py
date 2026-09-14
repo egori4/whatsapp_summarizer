@@ -47,6 +47,7 @@ class DurableSpool:
         self.connection.execute(f"PRAGMA busy_timeout={_LOCK_BUSY_TIMEOUT_MS}")
         if first_create:
             os.chmod(self.path, 0o600)
+        self._preflight_existing_boundary()
         self._initialize()
 
     def close(self) -> None:
@@ -57,6 +58,33 @@ class DurableSpool:
 
     def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
         self.close()
+
+    def _preflight_existing_boundary(self) -> None:
+        """Reject an existing foreign or unpinned populated spool before schema writes."""
+        tables = {
+            str(row["name"])
+            for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if "metadata" not in tables:
+            if "messages" in tables and int(
+                self.connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
+            ):
+                raise BoundaryError("legacy spool without immutable target metadata is unsafe to migrate")
+            return
+        pin = self.connection.execute(
+            "SELECT value FROM metadata WHERE key='target_group_jid'"
+        ).fetchone()
+        if pin is not None and pin["value"] != self.target_group_jid:
+            raise BoundaryError("spool is permanently bound to a different target JID")
+        if "messages" in tables:
+            row_count = int(self.connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"])
+            if pin is None and row_count:
+                raise BoundaryError("legacy spool without immutable target metadata is unsafe to migrate")
+            mixed = self.connection.execute(
+                "SELECT 1 FROM messages WHERE chat_jid != ? LIMIT 1", (self.target_group_jid,)
+            ).fetchone()
+            if mixed:
+                raise BoundaryError("mixed-JID state is unsafe and cannot be reopened")
 
     def _initialize(self) -> None:
         self.connection.executescript("""
@@ -101,6 +129,11 @@ class DurableSpool:
               digest_id TEXT PRIMARY KEY REFERENCES digest_runs(digest_id) ON DELETE CASCADE,
               schema_version TEXT NOT NULL, provenance_json TEXT NOT NULL, provenance_hash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS open_questions (
+              message_id TEXT PRIMARY KEY, question_change_seq INTEGER NOT NULL UNIQUE,
+              status TEXT NOT NULL CHECK(status IN ('open','partial','resolved')),
+              opened_digest_id TEXT NOT NULL, updated_digest_id TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS reviewed_artifacts (
               review_id TEXT PRIMARY KEY, checkpoint_seq INTEGER NOT NULL, cutoff_seq INTEGER NOT NULL,
               run_type TEXT NOT NULL, created_at TEXT NOT NULL, content_hash TEXT NOT NULL,
@@ -112,6 +145,28 @@ class DurableSpool:
         digest_run_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(digest_runs)")}
         if "omission_checkpoint_seq" not in digest_run_columns:
             self.connection.execute("ALTER TABLE digest_runs ADD COLUMN omission_checkpoint_seq INTEGER")
+        question_columns = list(self.connection.execute("PRAGMA table_info(open_questions)"))
+        question_primary_key = next((row["name"] for row in question_columns if row["pk"]), None)
+        if question_primary_key == "question_change_seq":
+            self.connection.executescript("""
+                BEGIN IMMEDIATE;
+                ALTER TABLE open_questions RENAME TO open_questions_revision_keyed;
+                CREATE TABLE open_questions (
+                  message_id TEXT PRIMARY KEY, question_change_seq INTEGER NOT NULL UNIQUE,
+                  status TEXT NOT NULL CHECK(status IN ('open','partial','resolved')),
+                  opened_digest_id TEXT NOT NULL, updated_digest_id TEXT NOT NULL
+                );
+                INSERT INTO open_questions(message_id,question_change_seq,status,opened_digest_id,updated_digest_id)
+                SELECT legacy.message_id,legacy.question_change_seq,legacy.status,
+                       legacy.opened_digest_id,legacy.updated_digest_id
+                  FROM open_questions_revision_keyed legacy
+                  JOIN (
+                    SELECT message_id,MAX(question_change_seq) AS question_change_seq
+                      FROM open_questions_revision_keyed GROUP BY message_id
+                  ) latest USING(message_id,question_change_seq);
+                DROP TABLE open_questions_revision_keyed;
+                COMMIT;
+            """)
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             pin = self.connection.execute("SELECT value FROM metadata WHERE key='target_group_jid'").fetchone()
@@ -191,6 +246,14 @@ class DurableSpool:
                 ingest_seq, change_type = self._next("next_ingest_seq"), ("revocation" if revoked else "insert")
                 self.connection.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (message_id, self.target_group_jid, ingest_seq, change_seq, occurred_at, now, participant, event.get("display_name"), text_value, int(revoked)))
             self.connection.execute("INSERT INTO message_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (change_seq, message_id, change_type, now, occurred_at, participant, text_value, content_hash, int(revoked)))
+            if existing and revoked:
+                self.connection.execute("DELETE FROM open_questions WHERE message_id=?", (message_id,))
+            elif existing:
+                self.connection.execute(
+                    "UPDATE open_questions SET question_change_seq=? "
+                    "WHERE message_id=? AND status IN ('open','partial')",
+                    (change_seq, message_id),
+                )
             if not self.connection.execute("SELECT 1 FROM collector_health_intervals WHERE ended_at IS NULL").fetchone():
                 self.connection.execute(
                     "INSERT INTO collector_health_intervals(state,started_at,reason,bridge_identity,guard_active,last_heartbeat_at) VALUES (?,?,?,?,?,?)",
@@ -239,6 +302,24 @@ class DurableSpool:
         run_type = "first-run" if checkpoint == 0 else ("catch-up" if omitted else "normal")
         note = f"{omitted} durable changes older than {horizon_hours}h omitted" if omitted else None
         return within, run_type, note
+
+    def carry_forward_events(self, snapshot: Mapping[str, int]) -> list[dict[str, Any]]:
+        """Return only current source revisions for unresolved cross-day questions."""
+        cutoff = int(snapshot["cutoff_seq"])
+        return [dict(row) for row in self.connection.execute("""
+            SELECT v.change_seq, v.message_id, v.change_type, v.committed_at,
+                   v.occurred_at AS timestamp, v.participant, v.text, v.tombstone,
+                   m.ingest_seq, m.chat_jid, m.display_name
+              FROM open_questions q
+              JOIN message_versions v ON v.change_seq=q.question_change_seq
+              JOIN messages m ON m.message_id=q.message_id
+             WHERE q.status IN ('open','partial')
+               AND v.change_seq <= ?
+               AND m.chat_jid=?
+               AND m.current_change_seq=v.change_seq
+               AND m.tombstone=0
+             ORDER BY v.change_seq
+        """, (cutoff, self.target_group_jid))]
 
     def omission_prefix_checkpoint(self, snapshot: Mapping[str, int], *, now: datetime | None = None) -> int | None:
         """Return the safe omission prefix boundary, or None when old/fresh rows interleave."""
@@ -321,14 +402,24 @@ class DurableSpool:
             raise ValueError("provenance schema drift")
         schema_version = provenance.get("schema_version")
         topics, unanswered = provenance.get("topics"), provenance.get("unanswered")
-        if schema_version != "actionable-provenance-v1" or not isinstance(topics, list) or not topics or not isinstance(unanswered, list):
+        if (
+            schema_version not in {"actionable-provenance-v1", "actionable-provenance-v2"}
+            or not isinstance(topics, list)
+            or not isinstance(unanswered, list)
+            or (not topics and not unanswered)
+        ):
             raise ValueError("invalid actionable provenance envelope")
         topic_fields = ("source_revisions", "raw_keep_revisions", "reference_revisions", "question_revisions", "contributor_revisions")
+        expected_topic_fields = set(topic_fields)
+        if schema_version == "actionable-provenance-v2":
+            expected_topic_fields.add("question_resolution")
         revisions: list[tuple[str, int]] = []
+        answered_questions: dict[tuple[str, int], str] = {}
         for topic in topics:
-            if not isinstance(topic, Mapping) or set(topic) != set(topic_fields):
+            if not isinstance(topic, Mapping) or set(topic) != expected_topic_fields:
                 raise ValueError("provenance topic schema drift")
             source_revisions: set[tuple[str, int]] = set()
+            topic_questions: list[tuple[str, int]] = []
             for field in topic_fields:
                 values = topic[field]
                 if not isinstance(values, list):
@@ -342,7 +433,36 @@ class DurableSpool:
                     source_revisions = set(parsed)
                 elif not set(parsed) <= source_revisions:
                     raise ValueError("dependent provenance revision is outside its topic")
+                if field == "question_revisions":
+                    topic_questions = parsed
                 revisions.extend(parsed)
+            resolution = topic.get("question_resolution", "resolved" if topic_questions else None)
+            if (
+                (topic_questions and resolution not in {"partial", "resolved"})
+                or (not topic_questions and resolution is not None)
+                or any(question in answered_questions for question in topic_questions)
+            ):
+                raise ValueError("question resolution provenance is invalid")
+            if schema_version == "actionable-provenance-v2" and topic_questions:
+                question_set = set(topic_questions)
+                contributor_set = {
+                    self._provenance_revision(value)
+                    for value in topic["contributor_revisions"]
+                }
+                if not contributor_set - question_set:
+                    edit_row = None
+                    if len(question_set) == 1 and source_revisions == question_set:
+                        edit_row = self.connection.execute(
+                            "SELECT change_type FROM message_versions WHERE message_id=? AND change_seq=?",
+                            next(iter(question_set)),
+                        ).fetchone()
+                    self_resolving_edit = (
+                        edit_row is not None and edit_row["change_type"] == "edit"
+                    )
+                    if not self_resolving_edit:
+                        raise ValueError("question resolution requires a distinct answer revision")
+            answered_questions.update({question: resolution for question in topic_questions})
+        unanswered_questions: set[tuple[str, int]] = set()
         for unanswered_item in unanswered:
             if not isinstance(unanswered_item, Mapping) or set(unanswered_item) != {"question_revision", "context_revisions"}:
                 raise ValueError("unanswered provenance schema drift")
@@ -353,7 +473,23 @@ class DurableSpool:
             parsed_context = [self._provenance_revision(value) for value in context]
             if len(parsed_context) != len(set(parsed_context)):
                 raise ValueError("duplicate unanswered provenance revision")
+            unanswered_questions.add(question)
             revisions.extend([question, *parsed_context])
+        active_questions = {
+            (str(row["message_id"]), int(row["question_change_seq"]))
+            for row in self.connection.execute("""
+                SELECT q.message_id,q.question_change_seq
+                  FROM open_questions q
+                  JOIN messages m ON m.message_id=q.message_id
+                 WHERE q.status IN ('open','partial')
+                   AND q.question_change_seq <= ?
+                   AND m.chat_jid=?
+                   AND m.current_change_seq=q.question_change_seq
+                   AND m.tombstone=0
+            """, (cutoff, self.target_group_jid))
+        }
+        if not active_questions <= set(answered_questions) | unanswered_questions:
+            raise DeliveryBlockedError("validated provenance omitted a carried question")
         for message_id, change_seq in set(revisions):
             row = self.connection.execute(
                 "SELECT m.current_change_seq,m.tombstone FROM messages m JOIN message_versions v USING(message_id) WHERE m.message_id=? AND m.chat_jid=? AND v.change_seq=? AND v.change_seq<=?",
@@ -363,6 +499,65 @@ class DurableSpool:
                 raise DeliveryBlockedError("provenance source was revoked, superseded, or outside the digest snapshot")
         canonical = json.dumps(provenance, sort_keys=True, separators=(",", ":"))
         return schema_version, canonical, hashlib.sha256(canonical.encode()).hexdigest()
+
+    def validate_provenance(self, snapshot: Mapping[str, int], provenance: Mapping[str, Any]) -> None:
+        """Validate revision ownership and carried-question coverage before an external side effect."""
+        self._canonical_provenance(provenance, int(snapshot["cutoff_seq"]))
+
+    def _update_question_state(self, digest_id: str, provenance: Mapping[str, Any]) -> None:
+        unanswered = {
+            self._provenance_revision(item["question_revision"])
+            for item in provenance["unanswered"]
+        }
+        answered: list[tuple[tuple[str, int], str, list[tuple[str, int]]]] = []
+        for topic in provenance["topics"]:
+            topic_sources = [
+                self._provenance_revision(revision) for revision in topic["source_revisions"]
+            ]
+            status = topic.get("question_resolution", "resolved")
+            answered.extend(
+                (self._provenance_revision(revision), status, topic_sources)
+                for revision in topic["question_revisions"]
+            )
+        for message_id, change_seq in unanswered:
+            current_source = self.connection.execute(
+                "SELECT current_change_seq,tombstone FROM messages WHERE message_id=? AND chat_jid=?",
+                (message_id, self.target_group_jid),
+            ).fetchone()
+            if current_source is None or bool(current_source["tombstone"]):
+                continue
+            change_seq = int(current_source["current_change_seq"])
+            existing = self.connection.execute(
+                "SELECT status,opened_digest_id FROM open_questions WHERE message_id=?",
+                (message_id,),
+            ).fetchone()
+            status = "partial" if existing is not None and existing["status"] == "partial" else "open"
+            opened_digest_id = existing["opened_digest_id"] if existing is not None else digest_id
+            self.connection.execute(
+                "INSERT INTO open_questions(message_id,question_change_seq,status,opened_digest_id,updated_digest_id) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET "
+                "question_change_seq=excluded.question_change_seq,status=excluded.status,"
+                "updated_digest_id=excluded.updated_digest_id",
+                (message_id, change_seq, status, opened_digest_id, digest_id),
+            )
+        for (message_id, change_seq), status, topic_sources in answered:
+            if any(
+                (
+                    current := self.connection.execute(
+                        "SELECT current_change_seq,tombstone FROM messages WHERE message_id=? AND chat_jid=?",
+                        (source_message_id, self.target_group_jid),
+                    ).fetchone()
+                ) is None
+                or bool(current["tombstone"])
+                or int(current["current_change_seq"]) != source_change_seq
+                for source_message_id, source_change_seq in topic_sources
+            ):
+                continue
+            self.connection.execute(
+                "UPDATE open_questions SET status=?,updated_digest_id=? "
+                "WHERE question_change_seq=? AND message_id=? AND status IN ('open','partial')",
+                (status, digest_id, change_seq, message_id),
+            )
 
     def record_reviewed_artifact(self, snapshot: Mapping[str, int], run_type: str, output: str, *, candidate_count: int, source_count: int, model_id: str, config_hash: str, coverage_snapshot: str, provenance: Mapping[str, Any] | None) -> str:
         """Persist revision-only evidence for a human-reviewed render without delivery state."""
@@ -461,6 +656,8 @@ class DurableSpool:
                     "INSERT INTO digest_provenance(digest_id,schema_version,provenance_json,provenance_hash) VALUES (?,?,?,?) ON CONFLICT(digest_id) DO UPDATE SET schema_version=excluded.schema_version,provenance_json=excluded.provenance_json,provenance_hash=excluded.provenance_hash",
                     (digest_id, schema_version, provenance_json, provenance_hash),
                 )
+                if smtp_state == "accepted":
+                    self._update_question_state(digest_id, provenance)
             if smtp_state in self._TERMINAL:
                 if int(current["checkpoint_seq"]) != checkpoint:
                     raise DeliveryBlockedError("checkpoint changed during digest finalization")
@@ -484,6 +681,12 @@ class DurableSpool:
                 raise DeliveryBlockedError("only an unresolved digest can be reconciled")
             if outcome == "accepted":
                 self.connection.execute("UPDATE checkpoints SET checkpoint_seq=?,delivery_state='clear',updated_at=? WHERE id=1", (run["cutoff_seq"], self._now()))
+                provenance_row = self.connection.execute(
+                    "SELECT provenance_json FROM digest_provenance WHERE digest_id=?",
+                    (digest_id,),
+                ).fetchone()
+                if provenance_row is not None:
+                    self._update_question_state(digest_id, json.loads(provenance_row["provenance_json"]))
             else:
                 self.connection.execute("UPDATE checkpoints SET delivery_state='clear',updated_at=? WHERE id=1", (self._now(),))
             self.connection.execute("UPDATE digest_runs SET smtp_state=?,smtp_message_id=?,checkpoint_decision=? WHERE digest_id=?", (outcome, message_id, "advance" if outcome == "accepted" else "retain", digest_id))
@@ -543,6 +746,12 @@ class DurableSpool:
             "provenance_hash": row["provenance_hash"],
         }
 
+    def question_states(self) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.connection.execute(
+            "SELECT message_id,question_change_seq AS change_seq,status,opened_digest_id,updated_digest_id "
+            "FROM open_questions ORDER BY question_change_seq"
+        )]
+
     def classify(self, change_seq: int, disposition: str, confidence: float | None, model_id: str, failure_state: str = "ok", *, category: str | None = None, topic_hint: str | None = None, rationale: str | None = None) -> None:
         if disposition not in {"MATERIAL", "SUPPORTING_CONTEXT", "NOISE", "UNCERTAIN"}:
             raise ValueError("invalid disposition")
@@ -591,7 +800,8 @@ class DurableSpool:
     def purge(self, now: datetime | None = None) -> tuple[int, int]:
         now = now or datetime.now(timezone.utc)
         raw_cutoff, digest_cutoff = (now - timedelta(days=7)).isoformat(), (now - timedelta(days=90)).isoformat()
-        with self.connection:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
             checkpoint_seq = int(
                 self.connection.execute(
                     "SELECT checkpoint_seq FROM checkpoints WHERE id=1"
@@ -599,12 +809,21 @@ class DurableSpool:
             )
             stale_versions = [row["change_seq"] for row in self.connection.execute(
                 "SELECT change_seq FROM message_versions "
-                "WHERE committed_at < ? AND change_seq <= ?",
+                "WHERE committed_at < ? AND change_seq <= ? "
+                "AND change_seq NOT IN (SELECT question_change_seq FROM open_questions WHERE status IN ('open','partial'))",
                 (raw_cutoff, checkpoint_seq),
             )]
             if stale_versions:
                 self.connection.executemany("DELETE FROM classifications WHERE change_seq=?", [(seq,) for seq in stale_versions])
                 self.connection.executemany("DELETE FROM message_versions WHERE change_seq=?", [(seq,) for seq in stale_versions])
+            self.connection.execute(
+                "DELETE FROM open_questions WHERE status='resolved' "
+                "AND question_change_seq NOT IN (SELECT change_seq FROM message_versions)"
+            )
             self.connection.execute("DELETE FROM messages WHERE message_id NOT IN (SELECT DISTINCT message_id FROM message_versions)")
             digests = self.connection.execute("DELETE FROM digest_runs WHERE created_at < ? AND smtp_state != 'unknown'", (digest_cutoff,)).rowcount
-        return len(stale_versions), digests
+            self.connection.execute("COMMIT")
+            return len(stale_versions), digests
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise

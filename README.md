@@ -20,7 +20,8 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `0.3.0` | Phase 2 findings: `api_token` privacy hardening and deterministic accountability for source-authored status changes (current) |
+| `0.4.0` | Cross-day unanswered-question carry-forward/resolution state and Phase 3 semantic pilot (current) |
+| `0.3.0` | Phase 2 findings: `api_token` privacy hardening and deterministic accountability for source-authored status changes |
 | `0.2.1` | Synthetic one-pass quality-evaluation corpus, scoring harness, bounded call accounting, and owner-only evidence controls |
 | `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest |
 | `0.1.0` | Collector, spool, two-stage and one-pass pipelines, reviewed-artifact delivery, inert scheduler source |
@@ -35,7 +36,19 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 
 ## Current Version-Controlled Change
 
-**`0.3.0` — Apply the first Phase 2 quality findings.**
+**`0.4.0` — Add cross-day question state and the Phase 3 semantic pilot.**
+
+- In the one-pass actionable pipeline, accepted unanswered questions and problem statements are retained by stable message identity plus their current immutable revision, then carried into the next nonempty source window without replaying unrelated history. A switch to the legacy two-stage path fails closed while carried state exists because that path has no actionable provenance contract.
+- Edits rebind tracked state to the edited revision so it cannot be silently omitted. Revocations remove the tracked item and release its prior source revision for normal raw-message purging.
+- Later validated source-backed answers explicitly classify a carried item as `partial` or `resolved`; the presence of a limitation alone does not imply an incomplete answer. A normal question/issue resolution must contain reader-facing evidence grounded in a distinct included answer revision. An edited tracked revision declared as `UPDATE` is the only self-resolution exception. Both question and declarative-issue resolutions are supported, and omission still fails before render-only output or SMTP.
+- The one-pass prompt receives only allowlisted state/revision hints: `tracked_item` for tracked sources and an `edit` revision kind for edited actionable sources. Stable message identity and spool metadata remain local.
+- Open and partially answered current source revisions are excluded from raw-message purging. Resolved state is removed after its source revision reaches normal retention expiry, and the coupled purge steps execute in one explicit transaction.
+- Cross-day state is checked before any legacy two-stage model construction, even with no new pending events. A tracked edit removed by deterministic acknowledgement/policy-override filtering blocks before model construction and must be corrected or revoked at the source before retrying. An answer revoked or superseded before an unknown delivery is reconciled cannot close the tracked item.
+- A fully synthetic three-day fixture exercises limited workarounds, version scope, unanswered retention, acknowledgement removal, source-only topics, readable titles, and current-window date labels. A follow-up review corrected its verification-command answer from `partial` to `resolved` because the requested verification capability was fully answered despite a repair limitation.
+- The pilot did not invoke a configured model provider. Phase 2 provider-quality acceptance remains pending its separately approved focused rerun.
+- Final independent source re-review, deployment, reviewed-artifact acceptance, delivery, service activation, and scheduling remain separate approvals.
+
+The prior `0.3.0` release applied the first Phase 2 quality findings:
 
 - The initial 16-run synthetic smoke test used 19 Hermes calls and did not meet the model-quality gates. Sanitized aggregates and remediation are recorded in [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
 - Shared projection redaction now covers `api_token=...`, closing the concrete privacy regression found in both privacy-window prompts.
@@ -119,7 +132,7 @@ all eligible normalized current message revisions
 
 Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, word-bounded exact normalized and privacy-sanitized source excerpts, exact protected-token membership, attribution, confidence, and unresolved issues. Excerpts that drop an immediately preceding negator are rejected.
 
-Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, and resolvable opaque reply linkage only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode deterministically excludes messages flagged `mechanical_ack` or `untrusted_policy_override` before constructing the model prompt.
+Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode deterministically excludes messages flagged `mechanical_ack` or `untrusted_policy_override` before constructing the model prompt; if such filtering removes a tracked revision, processing blocks before model construction.
 
 The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
 

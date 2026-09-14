@@ -68,6 +68,10 @@ For each isolated rendered artifact, check:
 - source negation is preserved, and explicitly fixed/resolved issues are not listed as unanswered;
 - internal unanswered topic labels are not rendered, and an unanswered-only window still produces a useful digest;
 - a useful-but-limited workaround is an update with a limitation, not an unanswered item.
+- a limitation is not automatically a partial answer: compare the answer with the actual scope of the tracked question or problem;
+- a normal partial/resolved transition contains reader-facing evidence from a distinct answer source; only an edited tracked `UPDATE` may resolve from its own revision;
+- edited tracked items remain represented by their current revision, while revoked items disappear from carry-forward and return to normal raw-retention handling;
+- carried items do not expand the reader-facing date label beyond the current source window.
 
 An unanswered-only window should render a digest. An all-empty candidate with active source revisions must remain pending; the current source does not authorize an unattended no-material checkpoint advance.
 
@@ -80,6 +84,8 @@ An unanswered-only window should render a digest. An all-empty candidate with ac
 3. Add a deterministic regression test before changing validation or rendering behavior.
 4. Re-run unit tests, then use an isolated render-only replay.
 5. Obtain independent review before an operational retry.
+
+If the failure says a tracked revision was removed by deterministic safety filtering, do not edit the database or acknowledge the item away. Correct the source message so it is again a valid question, issue, or explicit edited resolution, or revoke it at the source if it should no longer be tracked; then retry only after the new revision has been collected. This recovery changes source state and does not itself authorize a model run, delivery, restart, or scheduling.
 
 ### Delivery uncertainty
 

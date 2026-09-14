@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import unittest
 
-from whatsapp_tech_digest.actionable_render import render_actionable as extracted_render_actionable
+from whatsapp_tech_digest.actionable_render import actionable_provenance, render_actionable as extracted_render_actionable
 from whatsapp_tech_digest.actionable_schema import actionable_schema
-from whatsapp_tech_digest.actionable_validate import actionable_source_map, protected_values
+from whatsapp_tech_digest.actionable_validate import actionable_source_map, date_label, protected_values
+from whatsapp_tech_digest.model_projection import project_model_sources
 from whatsapp_tech_digest.models import ModelFailure, StaticModel, render_actionable, summarize_actionable
 
 
@@ -97,6 +98,7 @@ class ActionableDigestTests(unittest.TestCase):
                     "question": "Has anyone upgraded Controller KVM from 10.10.6 toward 10.14.0?",
                     "question_source_ref": ref("upgrade-question", 1),
                     "question_source_kind": "QUESTION",
+                    "resolution_status": "resolved",
                     "situation": "Intermediate 10.11.0 fails with package exit code 100.",
                     "recommendation": "Upgrade directly to 10.14.0.",
                     "actions": [],
@@ -115,6 +117,7 @@ class ActionableDigestTests(unittest.TestCase):
                     "question": "How can I check stale ARP after replacing the appliance?",
                     "question_source_ref": ref("mac-question", 4),
                     "question_source_kind": "QUESTION",
+                    "resolution_status": "resolved",
                     "situation": "",
                     "recommendation": "",
                     "actions": [],
@@ -145,6 +148,7 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertNotIn("contributor_refs", required)
         self.assertIn("question_source_ref", required)
         self.assertIn("question_source_kind", required)
+        self.assertIn("resolution_status", required)
         unanswered_required = actionable_schema(self.sources())["properties"]["unanswered"]["items"]["required"]
         self.assertIn("question_source_kind", unanswered_required)
 
@@ -169,8 +173,10 @@ class ActionableDigestTests(unittest.TestCase):
     def test_validated_actionable_result_carries_revision_only_provenance(self):
         result = summarize_actionable(self.sources(), StaticModel(json.dumps(self.response())), StaticModel(json.dumps(self.response())))
 
-        self.assertEqual(result.provenance["schema_version"], "actionable-provenance-v1")
+        self.assertEqual(result.provenance["schema_version"], "actionable-provenance-v2")
         self.assertEqual(result.provenance["topics"][0]["source_revisions"], [["upgrade-question", 1], ["upgrade-answer", 2], ["upgrade-kb", 3]])
+        self.assertEqual(result.provenance["topics"][0]["question_resolution"], "resolved")
+        self.assertEqual(result.provenance["topics"][1]["question_resolution"], "resolved")
         serialized = json.dumps(result.provenance)
         for source in self.sources():
             self.assertNotIn(source["text"], serialized)
@@ -193,6 +199,33 @@ class ActionableDigestTests(unittest.TestCase):
         self.assertIn("Contributors: Engineer B, Engineer C", rendered)
         self.assertNotIn("I think Monitoring may show it.", rendered)
         self.assertEqual(rendered.count("Upgrade directly to 10.14.0."), 1)
+
+    def test_carried_only_render_uses_current_window_date_metadata(self):
+        self.assertEqual(date_label([{
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "carried_forward": True,
+            "digest_window_timestamps": ["2026-09-13T13:00:00+00:00"],
+        }]), "Sep 13")
+
+    def test_projection_exposes_only_safe_cross_day_state_hints(self):
+        projected = project_model_sources([{
+            "message_id": "private-message-id",
+            "change_seq": 2,
+            "chat_jid": "10000000-00000002@g.us",
+            "participant": "15551234567@s.whatsapp.net",
+            "text": "Release R2 supports compact import.",
+            "timestamp": "2026-09-13T13:00:00+00:00",
+            "change_type": "edit",
+            "tracked_item": True,
+            "digest_window_timestamps": ["2026-09-13T13:00:00+00:00"],
+        }])
+
+        self.assertTrue(projected[0]["tracked_item"])
+        self.assertEqual(projected[0]["revision_kind"], "edit")
+        serialized = json.dumps(projected)
+        self.assertNotIn("private-message-id", serialized)
+        self.assertNotIn("15551234567", serialized)
+        self.assertNotIn("digest_window_timestamps", serialized)
 
     def test_optional_topic_fields_are_omitted_instead_of_padded(self):
         response = self.response()
@@ -224,7 +257,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "The regional call is cancelled.",
                 "recommendation": "Please use the time to catch up and raise urgent findings.",
                 "actions": [],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -259,7 +292,7 @@ class ActionableDigestTests(unittest.TestCase):
                     "The AI Team was specifically asked to lead an AI-tools session for daily and complex tasks and should receive most of the presentation time.",
                     "Other regional members may volunteer.",
                 ],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -296,6 +329,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "",
                 "actions": ["Prepare the reliability slides before next week."],
                 "specifics": [], "limitation": "", "reference_refs": [],
+                "resolution_status": None,
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -348,6 +382,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "",
                 "actions": ["Prepare the reliability slides before next week."],
                 "specifics": [], "limitation": "", "reference_refs": [],
+                "resolution_status": None,
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -373,6 +408,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "Our deployment review meeting is confirmed", "recommendation": "",
                 "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "resolution_status": None,
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -405,6 +441,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "",
                 "actions": ["Prepare the reliability slides before next week."],
                 "specifics": [], "limitation": "", "reference_refs": [],
+                "resolution_status": None,
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -436,6 +473,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "",
                 "actions": ["Prepare the reliability slides before next week."],
                 "specifics": [], "limitation": "", "reference_refs": [],
+                "resolution_status": None,
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -482,6 +520,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "actions": [],
                 "specifics": [], "limitation": "",
                 "reference_refs": [],
+                "resolution_status": "resolved",
                 "confidence": "confirmed",
             }],
             "unanswered": [],
@@ -504,7 +543,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "",
                 "recommendation": "Inspect ARP and send GARP for the affected IP.",
                 "actions": [],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": "resolved", "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -528,7 +567,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "Use migration tool https://code.example.invalid/migrate.",
                 "actions": [],
                 "specifics": [{"source_ref": "S001", "value": "migration tool"}],
-                "limitation": "", "reference_refs": ["S001"], "confidence": "documented",
+                "limitation": "", "reference_refs": ["S001"], "resolution_status": None, "confidence": "documented",
             }],
             "unanswered": [{
                 "topic": "Historical traffic migration", "question_source_ref": "S002", "question_source_kind": "QUESTION",
@@ -557,7 +596,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "Use /info/interface/dump.",
                 "actions": [],
                 "specifics": [{"source_ref": "S001", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [{
                 "topic": "Interface state", "question_source_ref": "S002", "question_source_kind": "QUESTION", "context_refs": [],
@@ -586,7 +625,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "The deployment was reviewed during the session.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "field_guidance",
+                "reference_refs": [], "resolution_status": None, "confidence": "field_guidance",
             }],
             "unanswered": [{
                 "topic": "Unresolved observed behavior", "question_source_ref": "S001", "question_source_kind": "ISSUE",
@@ -616,7 +655,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "Document packet-reporting configuration before investigating protocol gaps.",
                 "recommendation": "", "specifics": [],
                 "actions": [],
-                "limitation": "", "reference_refs": [], "confidence": "field_guidance",
+                "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "field_guidance",
             }],
             "unanswered": [{
                 "topic": "Packet reporting", "question_source_ref": "S002", "question_source_kind": "ISSUE", "context_refs": [],
@@ -625,6 +664,131 @@ class ActionableDigestTests(unittest.TestCase):
         }
         rendered = render_actionable(json.dumps(response), sources)
         self.assertIn("Question / unresolved issue: Packet reporting differs", rendered)
+
+    def test_source_backed_issue_resolution_can_close_a_carried_issue(self):
+        sources = [{
+            "message_id": "issue", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "The archive service import fails with missing segments.",
+        }, {
+            "message_id": "fix", "change_seq": 2, "display_name": "Engineer B",
+            "timestamp": "2026-09-02T13:00:00+00:00",
+            "text": "Rebuild the archive index to restore the missing segments.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Archive recovery", "title": "Archive recovery",
+                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S002"],
+                "question": "", "question_source_ref": "S001", "question_source_kind": "ISSUE",
+                "resolution_status": "resolved",
+                "situation": "", "recommendation": "Rebuild the archive index to restore the missing segments.",
+                "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        rendered = render_actionable(json.dumps(response), sources)
+        provenance = actionable_provenance(json.dumps(response), sources)
+
+        self.assertIn("Rebuild the archive index", rendered)
+        self.assertEqual(provenance["topics"][0]["question_revisions"], [["issue", 1]])
+        self.assertEqual(provenance["topics"][0]["question_resolution"], "resolved")
+
+    def test_question_cannot_resolve_itself_without_distinct_answer_evidence(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Does release R2 support compact import?",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Compact import", "title": "Compact import support",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "Does release R2 support compact import?",
+                "question_source_ref": "S001", "question_source_kind": "QUESTION",
+                "resolution_status": "resolved",
+                "situation": "release R2 support compact import", "recommendation": "",
+                "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "distinct answer evidence"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_unrelated_second_source_cannot_fake_distinct_answer_evidence(self):
+        sources = [{
+            "message_id": "question", "change_seq": 1, "display_name": "Engineer A",
+            "timestamp": "2026-09-01T13:00:00+00:00",
+            "text": "Does release R2 support compact import?",
+        }, {
+            "message_id": "unrelated", "change_seq": 2, "display_name": "Engineer B",
+            "timestamp": "2026-09-01T13:01:00+00:00",
+            "text": "The unrelated dashboard review is complete.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+            "topics": [{
+                "topic": "Compact import", "title": "Compact import support",
+                "source_refs": ["S001", "S002"], "raw_keep_refs": ["S001"],
+                "question": "Does release R2 support compact import?",
+                "question_source_ref": "S001", "question_source_kind": "QUESTION",
+                "resolution_status": "resolved",
+                "situation": "release R2 support compact import", "recommendation": "",
+                "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        with self.assertRaisesRegex(ModelFailure, "reader-facing evidence from a distinct answer source"):
+            render_actionable(json.dumps(response), sources)
+
+    def test_edited_tracked_item_can_supply_its_own_resolution(self):
+        sources = [{
+            "message_id": "edited-question", "change_seq": 2, "display_name": "Engineer A",
+            "timestamp": "2026-09-02T13:00:00+00:00",
+            "change_type": "edit",
+            "text": "Release R2 supports compact import.",
+        }]
+        response = {
+            "dispositions": {"S001": "INCLUDE"},
+            "topics": [{
+                "topic": "Compact import", "title": "Compact import support",
+                "source_refs": ["S001"], "raw_keep_refs": ["S001"],
+                "question": "", "question_source_ref": "S001", "question_source_kind": "UPDATE",
+                "resolution_status": "resolved",
+                "situation": "Release R2 supports compact import.", "recommendation": "",
+                "actions": [], "specifics": [], "limitation": "", "reference_refs": [],
+                "confidence": "confirmed",
+            }],
+            "unanswered": [],
+        }
+
+        provenance = actionable_provenance(json.dumps(response), sources)
+
+        self.assertIn("Compact import support", render_actionable(json.dumps(response), sources))
+        self.assertEqual(provenance["topics"][0]["question_resolution"], "resolved")
+
+    def test_original_question_cannot_be_mislabeled_as_an_edited_resolution(self):
+        response = self.response()
+        response["topics"][0]["question"] = ""
+        response["topics"][0]["question_source_kind"] = "UPDATE"
+
+        with self.assertRaisesRegex(ModelFailure, "edited revision"):
+            render_actionable(json.dumps(response), self.sources())
+
+    def test_partial_resolution_requires_a_source_backed_remaining_gap(self):
+        response = self.response()
+        response["topics"][0]["resolution_status"] = "partial"
+        response["topics"][0]["limitation"] = ""
+
+        with self.assertRaisesRegex(ModelFailure, "partial resolution requires"):
+            render_actionable(json.dumps(response), self.sources())
 
     def test_attribution_is_derived_from_thread_locally(self):
         sources = [
@@ -642,7 +806,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "Use /info/interface/dump.",
                 "actions": [],
                 "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "resolution_status": "resolved", "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -671,7 +835,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "situation": "", "recommendation": "Use /info/interface/dump.",
                 "actions": [],
                 "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "resolution_status": "resolved", "confidence": "confirmed",
             }], "unanswered": [],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -757,7 +921,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question_source_kind": "ANNOUNCEMENT", "situation": "The regional call is cancelled.",
                 "recommendation": "Prepare the slides before next week.",
                 "actions": [],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -786,7 +950,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "source_refs": ["S001"], "raw_keep_refs": ["S001"],
                 "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "", "recommendation": "", "actions": ["a participant should prepare the slides."],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
         }
         rendered = render_actionable(json.dumps(response), sources)
@@ -812,7 +976,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S002"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "", "recommendation": "Use /info/interface/dump.",
                 "actions": [], "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [{"topic": "Unresolved behavior", "question_source_ref": "S001", "question_source_kind": "QUESTION", "context_refs": [], "reason": "No reusable conclusion was established."}],
         }
@@ -833,7 +997,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S002"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "", "recommendation": "Use /info/interface/dump.",
                 "actions": [], "specifics": [{"source_ref": "S002", "value": "/info/interface/dump"}],
-                "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [{"topic": "Unresolved behavior", "question_source_ref": "S001", "question_source_kind": "QUESTION", "context_refs": [], "reason": "No reusable conclusion was established."}],
         }
@@ -923,7 +1087,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "A migration workshop was scheduled for next week.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -945,7 +1109,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question": "", "question_source_ref": None, "question_source_kind": None,
                 "situation": "The DPX50 migration session was rescheduled for next week.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -971,7 +1135,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "The migraine was cancelled.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -997,7 +1161,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S001", "S002"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "The migration was cancelled tomorrow.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -1018,7 +1182,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "", "recommendation": "",
                 "actions": ["restart the cluster before the upgrade completes."],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
         }
         with self.assertRaisesRegex(ModelFailure, "unsupported action"):
@@ -1036,7 +1200,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "raw_keep_refs": ["S001"], "question": "", "question_source_ref": None,
                 "question_source_kind": None, "situation": "estart the clus",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
         }
         with self.assertRaisesRegex(ModelFailure, "unsupported narrative"):
@@ -1069,7 +1233,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question": "Should the regional call be cancelled?", "question_source_ref": "S001",
                 "question_source_kind": "QUESTION", "situation": "The regional call is cancelled.",
                 "recommendation": "Prepare the slides before next week.", "actions": [],
-                "specifics": [], "limitation": "", "reference_refs": [], "confidence": "confirmed",
+                "specifics": [], "limitation": "", "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -1092,7 +1256,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question_source_ref": "S001", "question_source_kind": "QUESTION",
                 "situation": "Do not reboot the server during the migration window.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }
@@ -1114,7 +1278,7 @@ class ActionableDigestTests(unittest.TestCase):
                 "question_source_ref": "S001", "question_source_kind": "QUESTION",
                 "situation": "The upgrade is done, which resolves the DNS issue.",
                 "recommendation": "", "actions": [], "specifics": [], "limitation": "",
-                "reference_refs": [], "confidence": "confirmed",
+                "reference_refs": [], "resolution_status": None, "confidence": "confirmed",
             }],
             "unanswered": [],
         }

@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "source": "fully_synthetic_deidentified_semantic_fixture",
+  "description": "Three invented daily windows covering the Phase 3 semantic acceptance patterns. No wording, identity, identifier, product, command, or event is copied from an operational source.",
+  "days": [
+    {
+      "day": "2026-09-11",
+      "events": [
+        {"message_id": "search-workaround", "timestamp": "2026-09-11T14:00:00+00:00", "text": "Restart the local indexer to restore search until the next catalog refresh; this does not correct the catalog mismatch."},
+        {"message_id": "version-question", "timestamp": "2026-09-11T14:04:00+00:00", "text": "Does release 7.4 support compact policy import?"},
+        {"message_id": "day-one-ack", "timestamp": "2026-09-11T14:05:00+00:00", "text": "Understood."},
+        {"message_id": "archive-speculation", "timestamp": "2026-09-11T14:08:00+00:00", "text": "Maybe the team will replace the archive service next quarter."}
+      ],
+      "candidate": {
+        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE", "S003": "EXCLUDE"},
+        "topics": [
+          {
+            "topic": "Local search recovery",
+            "title": "Temporary search recovery",
+            "source_refs": ["S001"],
+            "raw_keep_refs": ["S001"],
+            "question": "",
+            "question_source_ref": null,
+            "question_source_kind": null,
+            "resolution_status": null,
+            "situation": "",
+            "recommendation": "Restart the local indexer to restore search until the next catalog refresh",
+            "actions": [],
+            "specifics": [],
+            "limitation": "this does not correct the catalog mismatch",
+            "reference_refs": [],
+            "confidence": "field_guidance"
+          }
+        ],
+        "unanswered": [
+          {
+            "topic": "Compact policy import support",
+            "question_source_ref": "S002",
+            "question_source_kind": "QUESTION",
+            "context_refs": [],
+            "reason": "No source-backed answer was supplied."
+          }
+        ]
+      },
+      "expect": {
+        "titles": ["Temporary search recovery"],
+        "included_text": ["Restart the local indexer to restore search until the next catalog refresh", "this does not correct the catalog mismatch", "Does release 7.4 support compact policy import?"],
+        "excluded_text": ["Understood.", "Maybe the team will replace the archive service next quarter."],
+        "question_states": {"version-question": "open"}
+      }
+    },
+    {
+      "day": "2026-09-12",
+      "events": [
+        {"message_id": "version-answer", "timestamp": "2026-09-12T14:00:00+00:00", "text": "Release 7.4 supports compact policy import, but release 7.3 requires the legacy format."},
+        {"message_id": "archive-question", "timestamp": "2026-09-12T14:03:00+00:00", "text": "Is there a supported command to verify archive consistency after import?"},
+        {"message_id": "day-two-ack", "timestamp": "2026-09-12T14:05:00+00:00", "text": "Thanks for the update."}
+      ],
+      "candidate": {
+        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE", "S003": "INCLUDE"},
+        "topics": [
+          {
+            "topic": "Compact policy import support",
+            "title": "Release-specific import support",
+            "source_refs": ["S001", "S002"],
+            "raw_keep_refs": ["S002"],
+            "question": "Does release 7.4 support compact policy import?",
+            "question_source_ref": "S001",
+            "question_source_kind": "QUESTION",
+            "resolution_status": "resolved",
+            "situation": "Release 7.4 supports compact policy import, but release 7.3 requires the legacy format.",
+            "recommendation": "",
+            "actions": [],
+            "specifics": [
+              {"source_ref": "S002", "value": "7.4"},
+              {"source_ref": "S002", "value": "7.3"}
+            ],
+            "limitation": "",
+            "reference_refs": [],
+            "confidence": "confirmed"
+          }
+        ],
+        "unanswered": [
+          {
+            "topic": "Archive consistency verification",
+            "question_source_ref": "S003",
+            "question_source_kind": "QUESTION",
+            "context_refs": [],
+            "reason": "No source-backed command was supplied."
+          }
+        ]
+      },
+      "expect": {
+        "titles": ["Release-specific import support"],
+        "included_text": ["Release 7.4 supports compact policy import, but release 7.3 requires the legacy format.", "Is there a supported command to verify archive consistency after import?"],
+        "excluded_text": ["Thanks for the update.", "all releases support compact policy import"],
+        "question_states": {"version-question": "resolved", "archive-question": "open"}
+      }
+    },
+    {
+      "day": "2026-09-13",
+      "events": [
+        {"message_id": "archive-workaround", "timestamp": "2026-09-13T14:00:00+00:00", "text": "Run archive inspect to detect missing segments; the command reports inconsistencies but does not repair them."},
+        {"message_id": "day-three-ack", "timestamp": "2026-09-13T14:02:00+00:00", "text": "Got it."}
+      ],
+      "candidate": {
+        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+        "topics": [
+          {
+            "topic": "Archive consistency verification",
+            "title": "Archive inspection limits",
+            "source_refs": ["S001", "S002"],
+            "raw_keep_refs": ["S002"],
+            "question": "Is there a supported command to verify archive consistency after import?",
+            "question_source_ref": "S001",
+            "question_source_kind": "QUESTION",
+            "resolution_status": "resolved",
+            "situation": "",
+            "recommendation": "Run archive inspect to detect missing segments",
+            "actions": [],
+            "specifics": [],
+            "limitation": "the command reports inconsistencies but does not repair them",
+            "reference_refs": [],
+            "confidence": "field_guidance"
+          }
+        ],
+        "unanswered": []
+      },
+      "expect": {
+        "titles": ["Archive inspection limits"],
+        "included_text": ["Run archive inspect to detect missing segments", "the command reports inconsistencies but does not repair them"],
+        "excluded_text": ["Got it.", "repairs missing segments"],
+        "question_states": {"version-question": "resolved", "archive-question": "resolved"}
+      }
+    }
+  ]
+}

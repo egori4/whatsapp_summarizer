@@ -19,7 +19,7 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "type": "object", "additionalProperties": False,
         "required": [
             "topic", "title", "source_refs", "raw_keep_refs",
-            "question", "question_source_ref", "question_source_kind", "situation", "recommendation", "actions", "specifics", "limitation",
+            "question", "question_source_ref", "question_source_kind", "resolution_status", "situation", "recommendation", "actions", "specifics", "limitation",
             "reference_refs", "confidence",
         ],
         "properties": {
@@ -29,7 +29,8 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "raw_keep_refs": required_ref_array,
             "question": {"type": "string", "maxLength": 240},
             "question_source_ref": {"anyOf": [ref, {"type": "null"}]},
-            "question_source_kind": {"anyOf": [{"type": "string", "enum": ["QUESTION"]}, {"type": "null"}]},
+            "question_source_kind": {"anyOf": [{"type": "string", "enum": ["QUESTION", "ISSUE", "UPDATE"]}, {"type": "null"}]},
+            "resolution_status": {"anyOf": [{"type": "string", "enum": ["partial", "resolved"]}, {"type": "null"}]},
             "situation": {"type": "string", "maxLength": 600},
             "recommendation": {"type": "string", "maxLength": 600},
             "actions": {"type": "array", "maxItems": 12, "items": {"type": "string", "minLength": 1, "maxLength": 600}, "uniqueItems": True},

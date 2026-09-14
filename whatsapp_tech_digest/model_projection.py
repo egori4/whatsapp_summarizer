@@ -81,6 +81,10 @@ def project_model_sources(
         timestamp = item.get("timestamp")
         if isinstance(timestamp, str) and timestamp:
             entry["timestamp"] = timestamp
+        if item.get("tracked_item") is True:
+            entry["tracked_item"] = True
+        if item.get("change_type") == "edit":
+            entry["revision_kind"] = "edit"
         projected.append(entry)
     return projected
 

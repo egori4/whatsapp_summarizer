@@ -121,6 +121,34 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
                 coverage_snapshot=json.dumps(spool.coverage()),
             )
         raise DeliveryBlockedError("durable omissions must be explicitly reconciled before model processing or SMTP")
+    carried = spool.carry_forward_events(snapshot)
+    if carried and config.models.pipeline_mode != "one_pass":
+        raise DeliveryBlockedError("cross-day question state requires the one-pass actionable pipeline")
+    tracked_revisions = {(str(item["message_id"]), int(item["change_seq"])) for item in carried}
+    if events:
+        pending_revisions = {(str(item["message_id"]), int(item["change_seq"])) for item in events}
+        window_timestamps = [item.get("timestamp") for item in events if item.get("timestamp")]
+        events = [
+            *[
+                {
+                    **item,
+                    "carried_forward": True,
+                    "tracked_item": True,
+                    "digest_window_timestamps": window_timestamps,
+                }
+                for item in carried
+                if (str(item["message_id"]), int(item["change_seq"])) not in pending_revisions
+            ],
+            *[
+                {
+                    **item,
+                    "tracked_item": (
+                        str(item["message_id"]), int(item["change_seq"])
+                    ) in tracked_revisions,
+                }
+                for item in events
+            ],
+        ]
     spool.require_current(events)
     normalized = stage_zero(events)
     if execution_mode == "validate-only":
@@ -130,6 +158,14 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
             item for item in normalized
             if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")
         ]
+        selected_revisions = {
+            (str(item["message_id"]), int(item["change_seq"])) for item in selected
+        }
+        if events and tracked_revisions - selected_revisions:
+            raise DeliveryBlockedError(
+                "a tracked revision was removed by deterministic safety filtering; "
+                "correct or revoke that source revision before retrying"
+            )
         degraded = False
     else:
         selected, degraded = high_recall_select(
@@ -155,6 +191,10 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
         if execution_mode == "delivery-capable":
             spool.record_run(snapshot, run_type, "failed", omission_note=omission, candidate_count=len(selected), source_count=len(events), config_hash=_config_hash(policy_path), coverage_snapshot=json.dumps(spool.coverage()))
         raise
+    if result.text and config.models.pipeline_mode == "one_pass":
+        if result.provenance is None:
+            raise DeliveryBlockedError("a rendered candidate requires validated provenance")
+        spool.validate_provenance(snapshot, result.provenance)
     if execution_mode == "render-only":
         if review_manifest is not None:
             if not result.text or result.provenance is None:

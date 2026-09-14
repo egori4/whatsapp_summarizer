@@ -52,3 +52,18 @@ The representative fixture now includes one unresolved technical utility request
 ## Remaining acceptance limit
 
 This is one representative human-quality acceptance run, not a guarantee for every possible input or a production approval. The broader adversarial/revision scenario suite still requires repeated local-model review before production activation can be considered.
+
+## Phase 3 source-level reviewed pilot
+
+The fully synthetic fixture `tests/fixtures/phase3_semantic_pilot.json` adds three daily windows and contains no operational wording, identities, identifiers, URLs, or runtime data; its product, release, and command details are invented. The pilot ran through the production renderer, grounding validator, actionable provenance builder, and an isolated temporary spool.
+
+The three reviewed candidates passed the Phase 3 checks:
+
+1. limited workarounds retained their exact source-backed limitations;
+2. the release-specific answer retained both stated release boundaries and was not generalized;
+3. unanswered questions were retained across days and moved only to explicitly classified, source-backed `partial` or `resolved` state;
+4. acknowledgements and nonmaterial speculation were removed;
+5. every rendered topic was supported by its declared source revisions; and
+6. generated titles were short reader-facing labels without source references or machine formatting.
+
+Follow-up read-only reviews found that the verification-command example was fully resolved even though the command could not repair the detected problem; treating every limitation as partial was incorrect. They also found edit/revocation lifecycle, declarative-issue resolution, carried-date, and question self-resolution defects. Regression-first remediation now uses stable message identity plus current revision, explicit resolution status, distinct reader-facing answer evidence, issue/update tracking, revocation release, current-window date labeling, unconditional pipeline-mode guarding, and atomic retention cleanup. All three deterministic candidates pass the corrected source-level checks. Final independent source re-review remains pending. This pilot did not invoke Ollama, Hermes, or another configured provider, and it does not alter the pending Phase 2 provider-quality decision. Deployment and delivery remain separately approval-gated.
