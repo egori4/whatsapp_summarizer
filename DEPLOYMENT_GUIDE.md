@@ -74,9 +74,11 @@ Run only against an isolated owner-only copy of the spool in `render-only` mode.
 
 A render-only result must not contact SMTP or advance a production checkpoint.
 
+For an operator-approved bounded historical recovery, select one explicit durable cutoff and write both the exact owner-only artifact and its owner-only portable envelope. The artifact must be reviewed as historical because later pending changes may correct or supersede its advice. Do not copy a reviewed-artifact database row between spools.
+
 ### Stage D — delivery authorization
 
-Delivery-capable execution is allowed only after explicit approval for the exact reviewed artifact. The reviewed-artifact boundary must verify the artifact hash, protected-policy hash, immutable source revisions, and checkpoint before SMTP is attempted. It must send the approved bytes rather than rerun a model.
+Delivery-capable execution is allowed only after explicit approval for the exact reviewed artifact. The live spool must independently verify the portable envelope, exact artifact bytes, protected-policy and target bindings, checkpoint/cutoff, delivery/replay state, and every immutable provenance revision before SMTP. It must send the approved bytes rather than rerun a model or render against production. Acceptance advances only to the envelope cutoff; later rows remain pending.
 
 The source tree also contains a distinct unattended wrapper that can generate and deliver in one `delivery-capable` run. It bypasses exact-artifact human review and therefore requires a separate explicit operating-policy decision and activation approval; the presence of that inert source is not authorization to use it.
 

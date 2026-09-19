@@ -445,8 +445,10 @@ class Part4RunnerTests(unittest.TestCase):
             self.assertEqual(output, result.text)
             self.assertEqual(smtp_calls, [])
             review = json.loads(manifest.read_text())
-            self.assertEqual(review["schema_version"], "reviewed-artifact-manifest-v1")
-            self.assertEqual(review["content_hash"], hashlib.sha256(output.encode()).hexdigest())
+            self.assertEqual(review["schema_version"], "portable-review-envelope-v1")
+            self.assertEqual(review["artifact_hash"], hashlib.sha256(output.encode()).hexdigest())
+            self.assertIn("provenance", review)
+            self.assertIn("envelope_hash", review)
             self.assertEqual(spool.connection.execute("SELECT count(*) FROM reviewed_artifacts").fetchone()[0], 1)
             self.assertEqual(spool.connection.execute("SELECT count(*) FROM digest_runs").fetchone()[0], 0)
             self.assertEqual(spool.connection.execute("SELECT count(*) FROM digest_provenance").fetchone()[0], 0)
@@ -474,6 +476,7 @@ class Part4RunnerTests(unittest.TestCase):
             result = DigestResult("Reviewed reader-safe digest.", ["technical"], "gpt-5.6-terra", False, provenance)
             manifest, artifact = root / "review.manifest.json", root / "reviewed.md"
             artifact.write_text(result.text)
+            artifact.chmod(0o600)
             with patch("whatsapp_tech_digest.run.build_model", lambda *_args: object()), patch("whatsapp_tech_digest.run.summarize_actionable", return_value=result):
                 run.generate(policy_path, spool_path, execution_mode="render-only", review_manifest=manifest)
             sent = []
@@ -504,6 +507,7 @@ class Part4RunnerTests(unittest.TestCase):
             result = DigestResult("Reviewed reader-safe digest.", ["technical"], "gpt-5.6-terra", False, provenance)
             manifest, artifact = root / "review.manifest.json", root / "reviewed.md"
             artifact.write_text("different content")
+            artifact.chmod(0o600)
             with patch("whatsapp_tech_digest.run.build_model", lambda *_args: object()), patch("whatsapp_tech_digest.run.summarize_actionable", return_value=result):
                 run.generate(policy_path, spool_path, execution_mode="render-only", review_manifest=manifest)
             smtp_calls = []
@@ -531,6 +535,7 @@ class Part4RunnerTests(unittest.TestCase):
             result = DigestResult("Reviewed reader-safe digest.", ["technical"], "gpt-5.6-terra", False, provenance)
             manifest, artifact = root / "review.manifest.json", root / "reviewed.md"
             artifact.write_text(result.text)
+            artifact.chmod(0o600)
             with patch("whatsapp_tech_digest.run.build_model", lambda *_args: object()), patch("whatsapp_tech_digest.run.summarize_actionable", return_value=result):
                 run.generate(policy_path, spool_path, execution_mode="render-only", review_manifest=manifest)
             with patch("whatsapp_tech_digest.run.send", return_value="failed"):

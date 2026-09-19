@@ -52,12 +52,16 @@ Do not print or copy any resulting identity, message, recipient, credential, pat
 
 - `validate-only` is the default and must not invoke a model, send SMTP, create a digest run, or advance a checkpoint.
 - `render-only` may invoke the approved model only after explicit approval. It must use an isolated spool for preview work and must not contact SMTP or mutate production checkpoint state.
+- Bounded-prefix recovery is operator-only. It requires an explicit durable cutoff plus owner-only artifact and portable-envelope output paths in `render-only`; the unattended wrapper and delivery-capable generation path cannot choose or infer it.
 - Only the one-pass pipeline may produce a deliverable candidate. The legacy two-stage pipeline is explicitly non-production and is refused for reviewed-artifact registration, `delivery-capable` runs, and reviewed-artifact delivery.
-- `delivery-capable` can either send an exact reviewed artifact without model regeneration or execute the separately gated unattended generate-and-deliver path. The reviewed-artifact path is the default operational recommendation; unattended use requires its own explicit policy and activation approval.
+- `delivery-capable` can either send an exact reviewed artifact after live-spool portable-envelope validation, without model regeneration or production rendering, or execute the separately gated unattended generate-and-deliver path. The reviewed-artifact path is the default operational recommendation; unattended use requires its own explicit policy and activation approval.
+- Keep the reviewed artifact and its envelope as regular owner-only `0600` files. Delivery refuses weaker permissions, and an SMTP transport failure leaves that exact artifact retryable, while an unresolved `unknown` outcome must go through reconciliation instead.
 
 ## Preview quality review
 
 For each isolated rendered artifact, check:
+
+- a bounded recovery artifact is visibly labeled as a historical backlog window, uses the operator-selected cutoff, and warns that later pending changes may correct or supersede it;
 
 - important announcements and direct assignments are retained;
 - technical discussions with reusable guidance are retained, with limitations when applicable;

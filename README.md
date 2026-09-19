@@ -20,7 +20,8 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair (current) |
+| `1.0.0` | Operator-only bounded-prefix recovery and portable isolated-review-to-live delivery binding (current) |
+| `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair |
 | `0.6.0` | Compact one-call dispositions, instructions, and prompt byte measurements |
 | `0.5.0` | One-pass semantic question/issue authority; remove conflicting local lexical gates |
 | `0.4.0` | Cross-day unanswered-question carry-forward/resolution state and Phase 3 semantic pilot |
@@ -39,6 +40,17 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 
 ## Current Version-Controlled Change
 
+**`1.0.0` — Add bounded-prefix recovery and portable reviewed-artifact delivery.**
+
+- An operator may select one explicit durable cutoff strictly after the checkpoint and no later than the latest durable change. The runner validates the nonempty contiguous prefix before constructing a model and binds that cutoff through event selection, provenance, artifact identity, delivery, and checkpoint advancement.
+- Bounded output is visibly labeled as a historical backlog window and warns that later pending changes may correct or supersede it. The normal unattended wrapper supplies no cutoff or review-bundle arguments, and delivery-capable execution rejects the cutoff option.
+- The bounded review path writes the exact artifact and a canonical owner-only portable envelope. The envelope contains policy/target bindings, checkpoint/cutoff, run/model/count/coverage metadata, artifact and provenance hashes, and revision-only provenance; it contains no message text, rendered prose, recipient, credential, or SMTP data.
+- Delivery through the live spool validates the exact artifact bytes, envelope schema/hash, policy and target bindings, unchanged checkpoint and clear delivery state, exact cutoff, immutable live revisions, and one-time consumption before SMTP. Because the envelope hashes are unkeyed, its source count, candidate count, and run type are additionally recomputed from live sources and its coverage metadata is replaced by live coverage in the durable record, so a rewritten envelope cannot assert unverified facts. It invokes no model and performs no production render. Accepted SMTP advances only the live checkpoint to the reviewed cutoff; failure or uncertainty does not advance it. An unresolved or already-accepted snapshot is terminal, while a transport failure leaves the exact same reviewed artifact retryable.
+- A bounded window is verified against the prefix state at its cutoff, so a later edit to an in-prefix source does not block delivery and remains pending for a subsequent digest. A revoked source always blocks, before the model call at render time and again at delivery time.
+- This phase was implemented and tested entirely offline. It did not invoke a model, access protected configuration or spools, render an operational artifact, contact SMTP, change a service, or alter scheduling.
+
+## Prior Version-Controlled Changes
+
 **`0.7.0` — Harden semantics, grounding, and failure handling.**
 
 - No English word list can include, exclude, classify, resolve, assign confidence to, or reject a production candidate. The acknowledgement, untrusted-policy-override, hedged-confidence, and status-change vocabularies and every enforcement site they drove are removed: normalization no longer emits `mechanical_ack` or `untrusted_policy_override`, the one-pass runner supplies every normalized current revision to the model, and the renderer no longer rejects a candidate for excluding or hedging a vocabulary match. Structural privacy, secret, JID, URL, opaque-reference, and protected-token matching is unchanged.
@@ -47,8 +59,6 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 - Provider transport failure and validation rejection are separate. Timeout, stale termination, child exit, empty output, prompt-budget, output-budget, and CLI-unavailable outcomes are terminal for the application call, so an identical effective final/fallback configuration cannot duplicate provider work and a distinct fallback is never reached by a transport failure. Only a real validation rejection may trigger exactly one repair, and the repair prompt carries a closed content-free failure code — never an exception string, rejected candidate, provider output, stderr, source text, identity, credential, or path.
 - The legacy two-stage pipeline still decides meaning from English vocabulary, so it is explicitly non-production: it cannot register a reviewed artifact, run `delivery-capable`, or deliver a reviewed artifact.
 - Source membership, provenance, question/issue, resolution-evidence, privacy, artifact, delivery, and checkpoint validation are unchanged. No model, protected configuration, runtime state, spool, artifact, SMTP, service, or scheduler was accessed for this phase.
-
-## Prior Version-Controlled Changes
 
 **`0.6.0` — Compact the one-call contract.**
 
@@ -171,16 +181,18 @@ The one-pass actionable path is structurally isolated into `actionable_schema.py
 The runner does not use an ambiguous `dry_run` switch. It accepts `--execution-mode` and defaults to the safest mode:
 
 - `validate-only` (default): parses policy, snapshots the spool, checks omissions/current revisions, and performs deterministic normalization. It never builds a model, sends SMTP, records a digest run, or advances a checkpoint.
-- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, only the allowlisted redacted source projection crosses the local Hermes CLI/provider boundary.
+- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. With explicit review artifact and envelope paths it writes both as owner-only files. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, only the allowlisted redacted source projection crosses the local Hermes CLI/provider boundary.
 - `delivery-capable`: is the only mode permitted to call SMTP or persist digest-run/checkpoint outcomes. It invokes `require_live_safe()` and remains subject to the separate live-policy and operational-approval gates; selecting it in source does not authorize activation or delivery.
 
 Read-only state commands (`--health`, `--status`, `--purge`, and reconciliation commands) do not accept a non-default execution mode.
 
 ### Reviewed-artifact delivery boundary
 
-A render-only run may be given `--review-manifest <owner-only.json>`. After deterministic output validation, it records a revision-only review envelope in the spool and writes an owner-only manifest containing only an opaque review ID and the rendered-content hash—never source text, rendered prose, recipients, or credentials. This does not create a digest run/provenance record, contact SMTP, or advance the checkpoint.
+A render-only run may be given `--review-manifest <owner-only.json>` and `--review-artifact <owner-only.md>`. After deterministic output validation, it writes the exact artifact and a canonical portable envelope containing checkpoint/cutoff, artifact/policy/target/provenance hashes, run/model/count/coverage metadata, and revision-only provenance—never source text inside the envelope, recipient data, credentials, or SMTP data. Both files are created mode `0600` under an owner-only parent; delivery refuses any artifact or envelope that is not a regular owner-only file, so a shell-redirected copy of the rendered output is not deliverable. This does not create a digest run/provenance record, contact SMTP, or advance the checkpoint.
 
-A later `--execution-mode delivery-capable --review-manifest <owner-only.json> --deliver-reviewed-artifact <reviewed.md>` validates the exact artifact hash, policy hash, immutable current source revisions, and checkpoint before SMTP. It sends the reviewed bytes directly and **does not rerun a model**. A changed artifact, changed policy, revoked/superseded source, or changed checkpoint blocks SMTP. The command remains separately approval-gated; selecting it does not authorize delivery.
+A later `--execution-mode delivery-capable --review-manifest <owner-only.json> --deliver-reviewed-artifact <reviewed.md>` lets the live spool independently validate and consume the portable envelope. It verifies the exact artifact bytes, canonical envelope and hashes, policy/target binding, immutable live source revisions, cutoff, checkpoint, delivery state, and replay state before SMTP, and recomputes the window's source count, candidate count, and run type from live data rather than trusting the envelope. It sends the reviewed bytes directly and **does not rerun a model or render against production**. A changed artifact/envelope, changed policy, wrong target, revoked source, changed checkpoint, count/run-type mismatch, or replay of an accepted or unresolved snapshot blocks SMTP; a transport failure leaves the same artifact retryable.
+
+An operator-only historical recovery render additionally supplies `--bounded-cutoff <durable-change-sequence>`. This option is valid only with `render-only`, `--review-manifest`, and `--review-artifact`. It selects the whole pending prefix through that cutoff, bypasses the normal age horizon without omitting rows, labels the artifact as historical, and leaves every later durable change pending. The scheduler and unattended wrapper cannot select this mode.
 
 ### Hermes Codex size budgets
 

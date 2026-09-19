@@ -139,12 +139,22 @@ class DurableSpool:
               run_type TEXT NOT NULL, created_at TEXT NOT NULL, content_hash TEXT NOT NULL,
               candidate_count INTEGER NOT NULL, source_count INTEGER NOT NULL, model_id TEXT,
               config_hash TEXT NOT NULL, coverage_snapshot TEXT, schema_version TEXT NOT NULL,
-              provenance_json TEXT NOT NULL, provenance_hash TEXT NOT NULL
+              provenance_json TEXT NOT NULL, provenance_hash TEXT NOT NULL,
+              window_kind TEXT NOT NULL DEFAULT 'complete', consumed_at TEXT
             );
         """)
         digest_run_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(digest_runs)")}
         if "omission_checkpoint_seq" not in digest_run_columns:
             self.connection.execute("ALTER TABLE digest_runs ADD COLUMN omission_checkpoint_seq INTEGER")
+        reviewed_columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(reviewed_artifacts)")
+        }
+        if "window_kind" not in reviewed_columns:
+            self.connection.execute(
+                "ALTER TABLE reviewed_artifacts ADD COLUMN window_kind TEXT NOT NULL DEFAULT 'complete'"
+            )
+        if "consumed_at" not in reviewed_columns:
+            self.connection.execute("ALTER TABLE reviewed_artifacts ADD COLUMN consumed_at TEXT")
         question_columns = list(self.connection.execute("PRAGMA table_info(open_questions)"))
         question_primary_key = next((row["name"] for row in question_columns if row["pk"]), None)
         if question_primary_key == "question_change_seq":
@@ -266,20 +276,43 @@ class DurableSpool:
             self.connection.execute("ROLLBACK")
             raise
 
-    def snapshot(self) -> dict[str, int]:
+    def snapshot(self, *, cutoff_seq: int | None = None) -> dict[str, int]:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             checkpoint = self.connection.execute("SELECT checkpoint_seq, delivery_state FROM checkpoints WHERE id=1").fetchone()
             if checkpoint["delivery_state"] == "unknown":
                 raise DeliveryBlockedError("unresolved SMTP acceptance blocks a new digest snapshot")
-            cutoff = int(self.connection.execute("SELECT value FROM metadata WHERE key='next_change_seq'").fetchone()["value"]) - 1
+            latest = int(self.connection.execute("SELECT value FROM metadata WHERE key='next_change_seq'").fetchone()["value"]) - 1
+            checkpoint_seq = int(checkpoint["checkpoint_seq"])
+            if cutoff_seq is None:
+                cutoff = latest
+            else:
+                if not isinstance(cutoff_seq, int) or isinstance(cutoff_seq, bool):
+                    raise ValueError("bounded cutoff must be an integer durable change sequence")
+                cutoff = cutoff_seq
+                if cutoff <= checkpoint_seq:
+                    raise DeliveryBlockedError("bounded cutoff must be strictly after the checkpoint")
+                if cutoff > latest:
+                    raise DeliveryBlockedError("bounded cutoff is later than the latest durable change")
+                if not self._is_target_change(cutoff):
+                    raise DeliveryBlockedError("bounded cutoff must identify a durable change")
+                if not self._snapshot_has_active_sources(
+                    {"checkpoint_seq": checkpoint_seq, "cutoff_seq": cutoff}
+                ):
+                    raise DeliveryBlockedError("bounded cutoff selects an empty active prefix")
             self.connection.execute("COMMIT")
-            return {"checkpoint_seq": int(checkpoint["checkpoint_seq"]), "cutoff_seq": cutoff}
+            return {"checkpoint_seq": checkpoint_seq, "cutoff_seq": cutoff}
         except Exception:
             self.connection.execute("ROLLBACK")
             raise
 
-    def pending_events(self, snapshot: Mapping[str, int], *, now: datetime | None = None) -> tuple[list[dict[str, Any]], str, str | None]:
+    def pending_events(
+        self,
+        snapshot: Mapping[str, int],
+        *,
+        now: datetime | None = None,
+        include_historical_prefix: bool = False,
+    ) -> tuple[list[dict[str, Any]], str, str | None]:
         now = now or datetime.now(timezone.utc)
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
         rows = [dict(row) for row in self.connection.execute("""
@@ -295,6 +328,8 @@ class DurableSpool:
              WHERE v.change_seq > ? AND m.chat_jid=? AND v.tombstone=0
              ORDER BY v.change_seq
         """, (cutoff, checkpoint, self.target_group_jid))]
+        if include_historical_prefix:
+            return rows, "bounded-backlog", None
         horizon_hours = 24 if checkpoint == 0 else 72
         horizon = now - timedelta(hours=horizon_hours)
         within = [row for row in rows if datetime.fromisoformat(row["committed_at"]) >= horizon]
@@ -303,23 +338,41 @@ class DurableSpool:
         note = f"{omitted} durable changes older than {horizon_hours}h omitted" if omitted else None
         return within, run_type, note
 
-    def carry_forward_events(self, snapshot: Mapping[str, int]) -> list[dict[str, Any]]:
+    def carry_forward_events(
+        self, snapshot: Mapping[str, int], *, allow_later_changes: bool = False
+    ) -> list[dict[str, Any]]:
         """Return only current source revisions for unresolved cross-day questions."""
         cutoff = int(snapshot["cutoff_seq"])
-        return [dict(row) for row in self.connection.execute("""
-            SELECT v.change_seq, v.message_id, v.change_type, v.committed_at,
-                   v.occurred_at AS timestamp, v.participant, v.text, v.tombstone,
-                   m.ingest_seq, m.chat_jid, m.display_name
-              FROM open_questions q
-              JOIN message_versions v ON v.change_seq=q.question_change_seq
-              JOIN messages m ON m.message_id=q.message_id
-             WHERE q.status IN ('open','partial')
-               AND v.change_seq <= ?
-               AND m.chat_jid=?
-               AND m.current_change_seq=v.change_seq
-               AND m.tombstone=0
-             ORDER BY v.change_seq
-        """, (cutoff, self.target_group_jid))]
+        if allow_later_changes:
+            rows = self.connection.execute("""
+                SELECT v.change_seq, v.message_id, v.change_type, v.committed_at,
+                       v.occurred_at AS timestamp, v.participant, v.text, v.tombstone,
+                       m.ingest_seq, m.chat_jid, m.display_name
+                  FROM open_questions q
+                  JOIN messages m ON m.message_id=q.message_id
+                  JOIN message_versions v ON v.message_id=q.message_id
+                 WHERE q.status IN ('open','partial')
+                   AND v.change_seq <= ? AND m.chat_jid=? AND v.tombstone=0 AND m.tombstone=0
+                   AND v.change_seq=(SELECT MAX(change_seq) FROM message_versions
+                       WHERE message_id=q.message_id AND change_seq<=?)
+                 ORDER BY v.change_seq
+            """, (cutoff, self.target_group_jid, cutoff))
+        else:
+            rows = self.connection.execute("""
+                SELECT v.change_seq, v.message_id, v.change_type, v.committed_at,
+                       v.occurred_at AS timestamp, v.participant, v.text, v.tombstone,
+                       m.ingest_seq, m.chat_jid, m.display_name
+                  FROM open_questions q
+                  JOIN message_versions v ON v.change_seq=q.question_change_seq
+                  JOIN messages m ON m.message_id=q.message_id
+                 WHERE q.status IN ('open','partial')
+                   AND v.change_seq <= ?
+                   AND m.chat_jid=?
+                   AND m.current_change_seq=v.change_seq
+                   AND m.tombstone=0
+                 ORDER BY v.change_seq
+            """, (cutoff, self.target_group_jid))
+        return [dict(row) for row in rows]
 
     def omission_prefix_checkpoint(self, snapshot: Mapping[str, int], *, now: datetime | None = None) -> int | None:
         """Return the safe omission prefix boundary, or None when old/fresh rows interleave."""
@@ -346,23 +399,43 @@ class DurableSpool:
             return None
         return boundary
 
-    def require_current(self, events: Sequence[Mapping[str, Any]]) -> None:
+    def require_current(
+        self, events: Sequence[Mapping[str, Any]], *, cutoff_seq: int | None = None
+    ) -> None:
         """Fail closed if a source changed after it was selected for processing."""
         if not events:
             return
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             for event in events:
-                row = self.connection.execute(
-                    "SELECT current_change_seq,tombstone FROM messages WHERE message_id=? AND chat_jid=?",
-                    (str(event["message_id"]), self.target_group_jid),
-                ).fetchone()
-                if row is None or int(row["current_change_seq"]) != int(event["change_seq"]) or bool(row["tombstone"]):
+                if cutoff_seq is None:
+                    row = self.connection.execute(
+                        "SELECT current_change_seq AS change_seq,tombstone FROM messages "
+                        "WHERE message_id=? AND chat_jid=?",
+                        (str(event["message_id"]), self.target_group_jid),
+                    ).fetchone()
+                else:
+                    row = self.connection.execute(
+                        "SELECT v.change_seq,v.tombstone FROM message_versions v "
+                        "JOIN messages m USING(message_id) WHERE v.message_id=? AND m.chat_jid=? "
+                        "AND m.tombstone=0 "
+                        "AND v.change_seq=(SELECT MAX(change_seq) FROM message_versions "
+                        "WHERE message_id=v.message_id AND change_seq<=?)",
+                        (str(event["message_id"]), self.target_group_jid, cutoff_seq),
+                    ).fetchone()
+                if row is None or int(row["change_seq"]) != int(event["change_seq"]) or bool(row["tombstone"]):
                     raise DeliveryBlockedError("a selected source was revoked or superseded; retry from a new snapshot")
             self.connection.execute("COMMIT")
         except Exception:
             self.connection.execute("ROLLBACK")
             raise
+
+    def _is_target_change(self, change_seq: int) -> bool:
+        return self.connection.execute(
+            "SELECT 1 FROM message_versions v JOIN messages m USING(message_id) "
+            "WHERE v.change_seq=? AND m.chat_jid=?",
+            (change_seq, self.target_group_jid),
+        ).fetchone() is not None
 
     def _snapshot_has_active_sources(self, snapshot: Mapping[str, int]) -> bool:
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
@@ -397,7 +470,13 @@ class DurableSpool:
             raise ValueError("provenance revisions must be [immutable_message_id, change_seq]")
         return value[0], value[1]
 
-    def _canonical_provenance(self, provenance: Mapping[str, Any], cutoff: int) -> tuple[str, str, str]:
+    def _canonical_provenance(
+        self,
+        provenance: Mapping[str, Any],
+        cutoff: int,
+        *,
+        allow_later_changes: bool = False,
+    ) -> tuple[str, str, str]:
         if not isinstance(provenance, Mapping) or set(provenance) != {"schema_version", "topics", "unanswered"}:
             raise ValueError("provenance schema drift")
         schema_version = provenance.get("schema_version")
@@ -475,9 +554,20 @@ class DurableSpool:
                 raise ValueError("duplicate unanswered provenance revision")
             unanswered_questions.add(question)
             revisions.extend([question, *parsed_context])
-        active_questions = {
-            (str(row["message_id"]), int(row["question_change_seq"]))
-            for row in self.connection.execute("""
+        if allow_later_changes:
+            active_question_rows = self.connection.execute("""
+                SELECT q.message_id,q.question_change_seq
+                  FROM open_questions q
+                  JOIN messages m ON m.message_id=q.message_id
+                  JOIN message_versions v ON v.message_id=q.message_id AND v.change_seq=q.question_change_seq
+                 WHERE q.status IN ('open','partial')
+                   AND q.question_change_seq <= ? AND m.chat_jid=? AND v.tombstone=0
+                   AND m.tombstone=0
+                   AND v.change_seq=(SELECT MAX(change_seq) FROM message_versions
+                       WHERE message_id=q.message_id AND change_seq<=?)
+            """, (cutoff, self.target_group_jid, cutoff))
+        else:
+            active_question_rows = self.connection.execute("""
                 SELECT q.message_id,q.question_change_seq
                   FROM open_questions q
                   JOIN messages m ON m.message_id=q.message_id
@@ -487,22 +577,46 @@ class DurableSpool:
                    AND m.current_change_seq=q.question_change_seq
                    AND m.tombstone=0
             """, (cutoff, self.target_group_jid))
+        active_questions = {
+            (str(row["message_id"]), int(row["question_change_seq"]))
+            for row in active_question_rows
         }
         if not active_questions <= set(answered_questions) | unanswered_questions:
             raise DeliveryBlockedError("validated provenance omitted a carried question")
         for message_id, change_seq in set(revisions):
-            row = self.connection.execute(
-                "SELECT m.current_change_seq,m.tombstone FROM messages m JOIN message_versions v USING(message_id) WHERE m.message_id=? AND m.chat_jid=? AND v.change_seq=? AND v.change_seq<=?",
-                (message_id, self.target_group_jid, change_seq, cutoff),
-            ).fetchone()
-            if row is None or int(row["current_change_seq"]) != change_seq or bool(row["tombstone"]):
+            if allow_later_changes:
+                row = self.connection.execute(
+                    "SELECT v.change_seq,v.tombstone FROM message_versions v JOIN messages m USING(message_id) "
+                    "WHERE m.message_id=? AND m.chat_jid=? AND v.change_seq=? AND v.change_seq<=? "
+                    "AND m.tombstone=0 "
+                    "AND v.change_seq=(SELECT MAX(change_seq) FROM message_versions WHERE message_id=m.message_id AND change_seq<=?)",
+                    (message_id, self.target_group_jid, change_seq, cutoff, cutoff),
+                ).fetchone()
+            else:
+                row = self.connection.execute(
+                    "SELECT m.current_change_seq AS change_seq,m.tombstone FROM messages m "
+                    "JOIN message_versions v USING(message_id) WHERE m.message_id=? AND m.chat_jid=? "
+                    "AND v.change_seq=? AND v.change_seq<=?",
+                    (message_id, self.target_group_jid, change_seq, cutoff),
+                ).fetchone()
+            if row is None or int(row["change_seq"]) != change_seq or bool(row["tombstone"]):
                 raise DeliveryBlockedError("provenance source was revoked, superseded, or outside the digest snapshot")
         canonical = json.dumps(provenance, sort_keys=True, separators=(",", ":"))
         return schema_version, canonical, hashlib.sha256(canonical.encode()).hexdigest()
 
-    def validate_provenance(self, snapshot: Mapping[str, int], provenance: Mapping[str, Any]) -> None:
+    def validate_provenance(
+        self,
+        snapshot: Mapping[str, int],
+        provenance: Mapping[str, Any],
+        *,
+        allow_later_changes: bool = False,
+    ) -> None:
         """Validate revision ownership and carried-question coverage before an external side effect."""
-        self._canonical_provenance(provenance, int(snapshot["cutoff_seq"]))
+        self._canonical_provenance(
+            provenance,
+            int(snapshot["cutoff_seq"]),
+            allow_later_changes=allow_later_changes,
+        )
 
     def _update_question_state(self, digest_id: str, provenance: Mapping[str, Any]) -> None:
         unanswered = {
@@ -559,31 +673,83 @@ class DurableSpool:
                 (status, digest_id, change_seq, message_id),
             )
 
-    def record_reviewed_artifact(self, snapshot: Mapping[str, int], run_type: str, output: str, *, candidate_count: int, source_count: int, model_id: str, config_hash: str, coverage_snapshot: str, provenance: Mapping[str, Any] | None) -> str:
+    @staticmethod
+    def _review_identity(
+        checkpoint: int,
+        cutoff: int,
+        content_hash: str,
+        provenance_hash: str,
+        config_hash: str,
+        window_kind: str,
+        run_type: str,
+        candidate_count: int,
+        source_count: int,
+        model_id: str | None,
+        coverage_snapshot: str,
+    ) -> str:
+        identity = json.dumps({
+            "schema": "reviewed-artifact-v2", "checkpoint_seq": checkpoint,
+            "cutoff_seq": cutoff, "content_hash": content_hash,
+            "provenance_hash": provenance_hash, "config_hash": config_hash,
+            "window_kind": window_kind, "run_type": run_type,
+            "candidate_count": candidate_count, "source_count": source_count,
+            "model_id": model_id, "coverage_snapshot": coverage_snapshot,
+        }, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(identity.encode()).hexdigest()
+
+    def record_reviewed_artifact(
+        self,
+        snapshot: Mapping[str, int],
+        run_type: str,
+        output: str,
+        *,
+        candidate_count: int,
+        source_count: int,
+        model_id: str,
+        config_hash: str,
+        coverage_snapshot: str,
+        provenance: Mapping[str, Any] | None,
+        window_kind: str = "complete",
+    ) -> str:
         """Persist revision-only evidence for a human-reviewed render without delivery state."""
         if not output or provenance is None or not config_hash:
             raise ValueError("reviewed artifacts require nonempty output, provenance, and config hash")
+        if window_kind not in {"complete", "bounded-historical-backlog"}:
+            raise ValueError("reviewed artifact window kind is invalid")
+        try:
+            coverage = json.loads(coverage_snapshot)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("reviewed artifact coverage metadata is invalid") from exc
+        if not isinstance(coverage, dict):
+            raise ValueError("reviewed artifact coverage metadata is invalid")
+        coverage_snapshot = json.dumps(coverage, sort_keys=True, separators=(",", ":"))
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
-        schema_version, provenance_json, provenance_hash = self._canonical_provenance(provenance, cutoff)
+        schema_version, provenance_json, provenance_hash = self._canonical_provenance(
+            provenance,
+            cutoff,
+            allow_later_changes=window_kind == "bounded-historical-backlog",
+        )
         content_hash = hashlib.sha256(output.encode()).hexdigest()
-        identity = json.dumps({
-            "schema": "reviewed-artifact-v1", "checkpoint_seq": checkpoint, "cutoff_seq": cutoff,
-            "content_hash": content_hash, "provenance_hash": provenance_hash, "config_hash": config_hash,
-        }, sort_keys=True, separators=(",", ":"))
-        review_id = hashlib.sha256(identity.encode()).hexdigest()
+        review_id = self._review_identity(
+            checkpoint, cutoff, content_hash, provenance_hash, config_hash, window_kind,
+            run_type, candidate_count, source_count, model_id, coverage_snapshot,
+        )
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             current = self.connection.execute("SELECT checkpoint_seq, delivery_state FROM checkpoints WHERE id=1").fetchone()
             if int(current["checkpoint_seq"]) != checkpoint or current["delivery_state"] != "clear":
                 raise DeliveryBlockedError("checkpoint changed while preparing reviewed artifact")
-            existing = self.connection.execute("SELECT content_hash, provenance_hash, config_hash FROM reviewed_artifacts WHERE review_id=?", (review_id,)).fetchone()
+            existing = self.connection.execute(
+                "SELECT content_hash,provenance_hash,config_hash,window_kind FROM reviewed_artifacts WHERE review_id=?",
+                (review_id,),
+            ).fetchone()
             if existing is not None:
-                if tuple(existing) != (content_hash, provenance_hash, config_hash):
+                if tuple(existing) != (content_hash, provenance_hash, config_hash, window_kind):
                     raise DeliveryBlockedError("reviewed artifact identity collision")
             else:
                 self.connection.execute(
-                    "INSERT INTO reviewed_artifacts(review_id,checkpoint_seq,cutoff_seq,run_type,created_at,content_hash,candidate_count,source_count,model_id,config_hash,coverage_snapshot,schema_version,provenance_json,provenance_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (review_id, checkpoint, cutoff, run_type, self._now(), content_hash, candidate_count, source_count, model_id, config_hash, coverage_snapshot, schema_version, provenance_json, provenance_hash),
+                    "INSERT INTO reviewed_artifacts(review_id,checkpoint_seq,cutoff_seq,run_type,created_at,content_hash,candidate_count,source_count,model_id,config_hash,coverage_snapshot,schema_version,provenance_json,provenance_hash,window_kind,consumed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+                    (review_id, checkpoint, cutoff, run_type, self._now(), content_hash, candidate_count, source_count, model_id, config_hash, coverage_snapshot, schema_version, provenance_json, provenance_hash, window_kind),
                 )
             self.connection.execute("COMMIT")
             return review_id
@@ -591,33 +757,167 @@ class DurableSpool:
             self.connection.execute("ROLLBACK")
             raise
 
-    def reviewed_artifact(self, review_id: str, output: str, *, config_hash: str) -> dict[str, Any]:
-        """Validate an exact reviewed body and return its revision-only delivery envelope."""
-        if not isinstance(review_id, str) or not review_id or not output or not config_hash:
-            raise DeliveryBlockedError("reviewed artifact identity, body, and config hash are required")
-        row = self.connection.execute("SELECT * FROM reviewed_artifacts WHERE review_id=?", (review_id,)).fetchone()
+    def portable_review_facts(self, review_id: str) -> dict[str, Any]:
+        """Return the private revision-only facts needed to build a portable envelope."""
+        row = self.connection.execute(
+            "SELECT * FROM reviewed_artifacts WHERE review_id=?", (review_id,)
+        ).fetchone()
         if row is None:
-            raise DeliveryBlockedError("reviewed artifact is unavailable")
-        if row["config_hash"] != config_hash:
-            raise DeliveryBlockedError("reviewed artifact was created under a different policy")
-        if row["content_hash"] != hashlib.sha256(output.encode()).hexdigest():
-            raise DeliveryBlockedError("reviewed artifact body hash does not match")
-        provenance = json.loads(row["provenance_json"])
-        schema_version, canonical, provenance_hash = self._canonical_provenance(provenance, int(row["cutoff_seq"]))
-        if schema_version != row["schema_version"] or canonical != row["provenance_json"] or provenance_hash != row["provenance_hash"]:
-            raise DeliveryBlockedError("reviewed artifact provenance is invalid")
-        current = self.connection.execute("SELECT checkpoint_seq, delivery_state FROM checkpoints WHERE id=1").fetchone()
-        if int(current["checkpoint_seq"]) != int(row["checkpoint_seq"]) or current["delivery_state"] != "clear":
-            raise DeliveryBlockedError("reviewed artifact checkpoint is no longer deliverable")
+            raise KeyError(review_id)
+        try:
+            coverage = json.loads(row["coverage_snapshot"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise DeliveryBlockedError("reviewed artifact coverage metadata is invalid") from exc
+        if not isinstance(coverage, dict):
+            raise DeliveryBlockedError("reviewed artifact coverage metadata is invalid")
         return {
-            "snapshot": {"checkpoint_seq": int(row["checkpoint_seq"]), "cutoff_seq": int(row["cutoff_seq"])},
-            "run_type": row["run_type"], "candidate_count": int(row["candidate_count"]),
-            "source_count": int(row["source_count"]), "model_id": row["model_id"],
-            "config_hash": row["config_hash"], "coverage_snapshot": row["coverage_snapshot"],
-            "provenance": provenance,
+            "review_id": row["review_id"],
+            "checkpoint_seq": int(row["checkpoint_seq"]),
+            "cutoff_seq": int(row["cutoff_seq"]),
+            "window_kind": row["window_kind"],
+            "run_type": row["run_type"],
+            "artifact_hash": row["content_hash"],
+            "candidate_count": int(row["candidate_count"]),
+            "source_count": int(row["source_count"]),
+            "model_id": row["model_id"],
+            "policy_hash": row["config_hash"],
+            "coverage_metadata": coverage,
+            "provenance_schema_version": row["schema_version"],
+            "provenance": json.loads(row["provenance_json"]),
+            "provenance_hash": row["provenance_hash"],
         }
 
-    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, omission_checkpoint_seq: int | None = None, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None) -> str:
+    def consume_portable_review(
+        self,
+        envelope: Mapping[str, Any],
+        output: str,
+        *,
+        config_hash: str,
+        expected_window: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Independently validate and consume one portable review on this live spool."""
+        checkpoint = int(envelope["checkpoint_seq"])
+        cutoff = int(envelope["cutoff_seq"])
+        window_kind = str(envelope["window_kind"])
+        if window_kind not in {"complete", "bounded-historical-backlog"}:
+            raise DeliveryBlockedError("portable review window kind is invalid")
+        if envelope["policy_hash"] != config_hash:
+            raise DeliveryBlockedError("portable review was created under a different policy")
+        if envelope["artifact_hash"] != hashlib.sha256(output.encode()).hexdigest():
+            raise DeliveryBlockedError("portable review artifact hash does not match")
+        provenance = envelope["provenance"]
+        allow_later_changes = window_kind == "bounded-historical-backlog"
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            current = self.connection.execute(
+                "SELECT checkpoint_seq,delivery_state FROM checkpoints WHERE id=1"
+            ).fetchone()
+            latest = int(self.connection.execute(
+                "SELECT value FROM metadata WHERE key='next_change_seq'"
+            ).fetchone()["value"]) - 1
+            if int(current["checkpoint_seq"]) != checkpoint or current["delivery_state"] != "clear":
+                raise DeliveryBlockedError("portable review checkpoint is no longer deliverable")
+            if cutoff <= checkpoint or cutoff > latest:
+                raise DeliveryBlockedError("portable review cutoff is outside the live pending window")
+            if window_kind == "complete" and cutoff != latest:
+                raise DeliveryBlockedError("complete portable review is stale")
+            if not self._is_target_change(cutoff) or not self._snapshot_has_active_sources(
+                {"checkpoint_seq": checkpoint, "cutoff_seq": cutoff}
+            ):
+                raise DeliveryBlockedError("portable review cutoff is not a nonempty durable prefix")
+            if (
+                int(envelope["source_count"]) != int(expected_window["source_count"])
+                or int(envelope["candidate_count"]) != int(expected_window["candidate_count"])
+                or envelope["run_type"] != expected_window["run_type"]
+            ):
+                raise DeliveryBlockedError(
+                    "portable review counts or run type do not match the live window"
+                )
+            schema_version, provenance_json, provenance_hash = self._canonical_provenance(
+                provenance, cutoff, allow_later_changes=allow_later_changes
+            )
+            if (
+                envelope["provenance_schema_version"] != schema_version
+                or envelope["provenance_hash"] != provenance_hash
+            ):
+                raise DeliveryBlockedError("portable review provenance hash does not match")
+            expected_review_id = self._review_identity(
+                checkpoint,
+                cutoff,
+                envelope["artifact_hash"],
+                provenance_hash,
+                config_hash,
+                window_kind,
+                envelope["run_type"],
+                int(envelope["candidate_count"]),
+                int(envelope["source_count"]),
+                envelope["model_id"],
+                json.dumps(
+                    envelope["coverage_metadata"], sort_keys=True, separators=(",", ":")
+                ),
+            )
+            if envelope["review_id"] != expected_review_id:
+                raise DeliveryBlockedError("portable review identity does not match")
+            existing_run = self.connection.execute(
+                "SELECT smtp_state FROM digest_runs WHERE checkpoint_seq=? AND cutoff_seq=?",
+                (checkpoint, cutoff),
+            ).fetchone()
+            # Only a transport failure leaves the snapshot retryable; anything else is terminal.
+            if existing_run is not None and existing_run["smtp_state"] != "failed":
+                raise DeliveryBlockedError(
+                    "portable review snapshot was already delivered or is unresolved"
+                )
+            existing = self.connection.execute(
+                "SELECT content_hash,provenance_hash,config_hash,window_kind,consumed_at "
+                "FROM reviewed_artifacts WHERE review_id=?",
+                (expected_review_id,),
+            ).fetchone()
+            expected = (
+                envelope["artifact_hash"], provenance_hash, config_hash, window_kind
+            )
+            if existing is not None:
+                if tuple(existing)[:4] != expected:
+                    raise DeliveryBlockedError("portable review identity collision")
+                if existing["consumed_at"] is not None and existing_run is None:
+                    raise DeliveryBlockedError("portable review was already consumed")
+                self.connection.execute(
+                    "UPDATE reviewed_artifacts SET consumed_at=? WHERE review_id=?",
+                    (self._now(), expected_review_id),
+                )
+            else:
+                coverage_snapshot = json.dumps(
+                    envelope["coverage_metadata"], sort_keys=True, separators=(",", ":")
+                )
+                self.connection.execute(
+                    "INSERT INTO reviewed_artifacts(review_id,checkpoint_seq,cutoff_seq,run_type,created_at,content_hash,candidate_count,source_count,model_id,config_hash,coverage_snapshot,schema_version,provenance_json,provenance_hash,window_kind,consumed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        expected_review_id, checkpoint, cutoff, envelope["run_type"],
+                        self._now(), envelope["artifact_hash"], envelope["candidate_count"],
+                        envelope["source_count"], envelope["model_id"], config_hash,
+                        coverage_snapshot, schema_version, provenance_json, provenance_hash,
+                        window_kind, self._now(),
+                    ),
+                )
+            self.connection.execute("COMMIT")
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
+        return {
+            "snapshot": {"checkpoint_seq": checkpoint, "cutoff_seq": cutoff},
+            "run_type": envelope["run_type"],
+            "candidate_count": int(envelope["candidate_count"]),
+            "source_count": int(envelope["source_count"]),
+            "model_id": envelope["model_id"],
+            "config_hash": config_hash,
+            "coverage_snapshot": json.dumps(
+                self.coverage(), sort_keys=True, separators=(",", ":")
+            ),
+            "provenance": provenance,
+            "window_kind": window_kind,
+        }
+
+    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, omission_checkpoint_seq: int | None = None, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None, allow_later_changes: bool = False) -> str:
         if smtp_state not in self._STATES:
             raise ValueError("invalid SMTP state")
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
@@ -639,7 +939,9 @@ class DurableSpool:
             )
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            provenance_row = self._canonical_provenance(provenance, cutoff) if provenance is not None else None
+            provenance_row = self._canonical_provenance(
+                provenance, cutoff, allow_later_changes=allow_later_changes
+            ) if provenance is not None else None
             current = self.connection.execute("SELECT checkpoint_seq, delivery_state FROM checkpoints WHERE id=1").fetchone()
             existing = self.connection.execute("SELECT smtp_state FROM digest_runs WHERE digest_id=?", (digest_id,)).fetchone()
             if existing and existing["smtp_state"] in self._TERMINAL and existing["smtp_state"] != smtp_state:

@@ -19,7 +19,7 @@ The policy retains `activate_only_after_dst_contract=true`. Before any timer act
 
 ### Recommended: scheduled render, separately approved exact delivery
 
-At 08:00, an inactive future timer would invoke `render-only` and write an owner-only dated artifact plus review manifest. It must not contact SMTP, create trusted delivery provenance, or advance the checkpoint. After human review, a separately approved `delivery-capable --deliver-reviewed-artifact` action sends only the exact manifest-bound bytes.
+At 08:00, an inactive future timer would invoke the normal unbounded path and write an owner-only dated artifact plus portable review envelope. It must never supply or infer a bounded cutoff, contact SMTP, create trusted delivery provenance, or advance the checkpoint. After human review, a separately approved `delivery-capable --deliver-reviewed-artifact` action sends only the exact envelope-bound bytes after live-spool validation.
 
 This preserves the tested reviewed-artifact security boundary.
 
