@@ -28,9 +28,9 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         package = (ROOT / "whatsapp_tech_digest" / "__init__.py").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertRegex(project, r'(?m)^version = "0\.4\.0"$')
-        self.assertRegex(package, r'(?m)^__version__ = "0\.4\.0"$')
-        self.assertIsNotNone(re.search(r"\| `0\.4\.0` \|.*\(current\)", readme))
+        self.assertRegex(project, r'(?m)^version = "0\.7\.0"$')
+        self.assertRegex(package, r'(?m)^__version__ = "0\.7\.0"$')
+        self.assertIsNotNone(re.search(r"\| `0\.7\.0` \|.*\(current\)", readme))
 
     def test_corpus_has_eight_synthetic_windows_and_declared_coverage(self) -> None:
         corpus = load_corpus(CORPUS)
@@ -250,7 +250,11 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
     def test_static_window_execution_counts_calls_and_writes_owner_only_evidence(self) -> None:
         window = next(window for window in load_corpus(CORPUS)["windows"] if window["id"] == "answered_question")
         response = json.dumps({
-            "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE", "S003": "INCLUDE"},
+            "dispositions": [
+                {"source_ref": "S001", "value": "INCLUDE"},
+                {"source_ref": "S002", "value": "INCLUDE"},
+                {"source_ref": "S003", "value": "INCLUDE"},
+            ],
             "topics": [{
                 "topic": "Interface state", "title": "Interface state",
                 "source_refs": ["S001", "S002", "S003"],
@@ -293,7 +297,9 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
             )
 
             self.assertEqual(len(results), 16)
-            self.assertEqual(sum(result["model_calls"] for result in results), 32)
+            # A transport failure is terminal, so each run costs exactly one call.
+            self.assertEqual(sum(result["model_calls"] for result in results), 16)
+            self.assertLessEqual(sum(result["model_calls"] for result in results), 32)
             self.assertTrue(all(not result["accepted"] for result in results))
             self.assertGreater(sum(result["score"]["missing_required_count"] for result in results), 0)
             self.assertEqual(len(list(artifact_dir.glob("run-*.json"))), 16)

@@ -14,8 +14,35 @@ class LocalModel(Protocol):
     def complete(self, prompt: str) -> str: ...
 
 
+@dataclass(frozen=True)
+class ModelDiagnostic:
+    """Content-free model execution metadata safe for error reporting."""
+
+    category: str
+    stage: str
+    child_returncode: int | None = None
+    duration_ms: int | None = None
+    stdout_bytes: int | None = None
+    stderr_bytes: int | None = None
+
+    def summary(self) -> str:
+        fields = [f"{self.category} stage={self.stage}"]
+        if self.child_returncode is not None:
+            fields.append(f"child_returncode={self.child_returncode}")
+        elif self.category == "timeout":
+            fields.append("child_returncode=none")
+        for name in ("duration_ms", "stdout_bytes", "stderr_bytes"):
+            value = getattr(self, name)
+            if value is not None:
+                fields.append(f"{name}={value}")
+        return " ".join(fields)
+
+
 class ModelFailure(RuntimeError):
-    pass
+    def __init__(self, message: str, *, diagnostic: ModelDiagnostic | None = None, code: str | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic = diagnostic
+        self.code = code
 
 
 class FailingModel:
@@ -47,12 +74,10 @@ class DigestResult:
     provenance: dict[str, Any] | None = None
 
 
-_ACKS = {"ok", "okay", "thanks", "thank you", "ack", "+1"}
-_ACK_ONLY = re.compile(r"(?i)^\s*(?:thanks?(?:\s*,?\s*(?:that(?:'s| is) helpful|for (?:the )?(?:help|update)))?|thank you(?:\s+for (?:the )?(?:help|update))?|understood|got it|okay|ok|ack|sounds good|i(?:'| a)?ll check(?: it)?(?: today)?|will check(?: it)?(?: today)?)\s*[.!…]*\s*$")
-_POLICY_OVERRIDE = re.compile(
-    r"(?is)\b(?:ignore|override|disregard|bypass)\b.{0,100}\b(?:instruction|policy|recipient|tool|output|schema)\b"
-    r"|\b(?:send|email|forward)\b.{0,100}\b(?:all|every)\b.{0,100}\b(?:message|history|data)\b"
-)
+_REPAIR_CODES = frozenset({
+    "SCHEMA", "SOURCE_REFERENCE", "DISPOSITION", "GROUNDING", "PROTECTED_VALUE",
+    "PRIVACY", "QUESTION", "RESOLUTION", "TITLE", "VALIDATION",
+})
 
 
 def _source_ref(item: Mapping[str, Any]) -> str:
@@ -161,9 +186,7 @@ def stage_zero(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             **event,
             "text": text,
             "redacted_text": redact_text(text),
-            "mechanical_ack": text.casefold() in _ACKS or _ACK_ONLY.fullmatch(text) is not None,
             "reaction_only": event.get("reaction_only") is True,
-            "untrusted_policy_override": _POLICY_OVERRIDE.search(text) is not None,
             "urls": re.findall(r"https?://[^\s]+", text),
         })
     return result
@@ -180,7 +203,7 @@ def _parse_time(value: object) -> datetime | None:
 
 def expand_context(items: Sequence[dict[str, Any]], candidate_refs: set[str], nearby: int = 2) -> list[dict[str, Any]]:
     """Include exact-source context without reintroducing a different revision."""
-    ordered = [item for item in items if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")]
+    ordered = list(items)
     refs = {_source_ref(item): index for index, item in enumerate(ordered)}
     indices = {refs[reference] for reference in candidate_refs if reference in refs}
     unique_message_refs: dict[str, str] = {}
@@ -341,13 +364,7 @@ def high_recall_select(items: Sequence[dict[str, Any]], model: LocalModel, noise
     degraded = False
     for start in range(0, len(items), batch_size):
         batch = list(items[start:start + batch_size])
-        guarded = [item for item in batch if item.get("untrusted_policy_override") or item.get("mechanical_ack")]
-        eligible = [item for item in batch if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")]
-        if spool is not None:
-            for item in guarded:
-                category = "untrusted_instruction" if item.get("untrusted_policy_override") else "ack"
-                rationale = "mechanical policy-override exclusion" if item.get("untrusted_policy_override") else "mechanical acknowledgement exclusion"
-                spool.classify(int(item["change_seq"]), "NOISE", 1.0, model_id, category=category, topic_hint="", rationale=rationale)
+        eligible = list(batch)
         if not eligible:
             continue
         try:
@@ -424,23 +441,28 @@ def build_digest(items: Sequence[dict[str, Any]], preclassifier: LocalModel, fin
     return summarize_selected(selected, final_model, fallback_model, degraded, final_instruction=final_instruction)
 
 
-def _repair_instruction(failure: Exception) -> str:
-    """Trusted, bounded feedback for the single final-model repair attempt.
+def _repair_code(failure: Exception) -> str:
+    """Map a local validation rejection onto the closed, content-free repair enum."""
+    if isinstance(failure, json.JSONDecodeError):
+        return "SCHEMA"
+    code = getattr(failure, "code", None)
+    return code if isinstance(code, str) and code in _REPAIR_CODES else "VALIDATION"
 
-    The rejected model output is deliberately not included: it may be malformed
-    or contain untrusted source-like content.  The local validator's concise
-    failure category is sufficient to make the next independent generation
-    correct its contract without weakening any grounding check.
+
+def _repair_instruction(code: str) -> str:
+    """Trusted, bounded feedback for the single validation repair attempt.
+
+    Only a closed failure code crosses this boundary.  The rejected candidate, the
+    validator message, provider output, and source text are all withheld: they may be
+    malformed or carry untrusted source-like content.
     """
-    detail = str(failure).replace("\n", " ").strip()
-    if len(detail) > 240:
-        detail = detail[:237] + "..."
+    if code not in _REPAIR_CODES:
+        code = "VALIDATION"
     return (
-        "REPAIR ATTEMPT: the previous candidate was rejected by the local "
-        f"validator ({type(failure).__name__}: {detail or 'unspecified failure'}). "
-        "Do not reproduce or discuss the invalid candidate. Generate a fresh "
-        "JSON-only digest from the supplied sources that follows every grounding, "
-        "disposition, question, and URL rule exactly.\n"
+        "REPAIR ATTEMPT: local validation rejected the previous candidate. "
+        f"Failure code: {code}. Do not reproduce or discuss the previous candidate. "
+        "Generate a fresh JSON-only digest from the supplied sources that satisfies every "
+        "schema, reference, grounding, title, and privacy rule exactly.\n"
     )
 
 
@@ -483,7 +505,7 @@ def summarize_selected(selected: Sequence[dict[str, Any]], final_model: LocalMod
             return DigestResult(rendered, _ids(selected), name, degraded or name != "final-9b")
         except Exception as exc:
             failures.append(type(exc).__name__)
-            repair_instruction = _repair_instruction(exc)
+            repair_instruction = _repair_instruction(_repair_code(exc))
     raise ModelFailure(f"both local final models failed ({','.join(failures)}); checkpoint must not advance")
 
 
@@ -506,7 +528,7 @@ def render_grounded(response: str, items: Sequence[dict[str, Any]]) -> str:
                 continue
             question_id = str(question_item["message_id"])
             for answer_ref, answer_item in sources.items():
-                if answer_ref == question_ref or dispositions[answer_ref] not in {"INCLUDE", "UNCERTAIN"} or answer_item.get("mechanical_ack") or answer_item.get("untrusted_policy_override"):
+                if answer_ref == question_ref or dispositions[answer_ref] not in {"INCLUDE", "UNCERTAIN"}:
                     continue
                 linked_ids = {str(answer_item.get("reply_to")), str(answer_item.get("quoted_message_id")), *(str(value) for value in (answer_item.get("referenced_ids") or []))}
                 answer_text = str(answer_item.get("redacted_text") or answer_item["text"])

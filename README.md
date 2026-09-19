@@ -20,7 +20,10 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `0.4.0` | Cross-day unanswered-question carry-forward/resolution state and Phase 3 semantic pilot (current) |
+| `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair (current) |
+| `0.6.0` | Compact one-call dispositions, instructions, and prompt byte measurements |
+| `0.5.0` | One-pass semantic question/issue authority; remove conflicting local lexical gates |
+| `0.4.0` | Cross-day unanswered-question carry-forward/resolution state and Phase 3 semantic pilot |
 | `0.3.0` | Phase 2 findings: `api_token` privacy hardening and deterministic accountability for source-authored status changes |
 | `0.2.1` | Synthetic one-pass quality-evaluation corpus, scoring harness, bounded call accounting, and owner-only evidence controls |
 | `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest |
@@ -35,6 +38,31 @@ Versioning rules for this repository:
 Only sanitized source, tests, examples, and documentation are committed. Policy, group directory, spool, rendered artifacts, review manifests, logs, credentials, and session data stay Git-ignored and owner-only. Run the full test suite and `git diff --check` before every commit, and obtain independent review for logic, privacy, or delivery-boundary changes.
 
 ## Current Version-Controlled Change
+
+**`0.7.0` — Harden semantics, grounding, and failure handling.**
+
+- No English word list can include, exclude, classify, resolve, assign confidence to, or reject a production candidate. The acknowledgement, untrusted-policy-override, hedged-confidence, and status-change vocabularies and every enforcement site they drove are removed: normalization no longer emits `mechanical_ack` or `untrusted_policy_override`, the one-pass runner supplies every normalized current revision to the model, and the renderer no longer rejects a candidate for excluding or hedging a vocabulary match. Structural privacy, secret, JID, URL, opaque-reference, and protected-token matching is unchanged.
+- Reader-facing prose is grounded by structure rather than by a negator list. A question, summary, recommendation, action, or limitation must equal exactly one complete mechanically delimited sentence (`.`, `!`, `?`, `;`) of a declared topic source, or that whole source. Mid-sentence clauses, stitched text, and spans that resolve ambiguously to more than one source location are rejected, so a clause can never be lifted out of the polarity, scope, or condition stated around it.
+- Generated titles stay readable but bounded: one line of at most 80 characters, no opaque source reference, no privacy placeholder, and no protected value or numeral that is absent from that topic's own validated reader-facing evidence.
+- Provider transport failure and validation rejection are separate. Timeout, stale termination, child exit, empty output, prompt-budget, output-budget, and CLI-unavailable outcomes are terminal for the application call, so an identical effective final/fallback configuration cannot duplicate provider work and a distinct fallback is never reached by a transport failure. Only a real validation rejection may trigger exactly one repair, and the repair prompt carries a closed content-free failure code — never an exception string, rejected candidate, provider output, stderr, source text, identity, credential, or path.
+- The legacy two-stage pipeline still decides meaning from English vocabulary, so it is explicitly non-production: it cannot register a reviewed artifact, run `delivery-capable`, or deliver a reviewed artifact.
+- Source membership, provenance, question/issue, resolution-evidence, privacy, artifact, delivery, and checkpoint validation are unchanged. No model, protected configuration, runtime state, spool, artifact, SMTP, service, or scheduler was accessed for this phase.
+
+## Prior Version-Controlled Changes
+
+**`0.6.0` — Compact the one-call contract.**
+
+- The provider response uses list-form disposition rows with ordinary string references. Local validation requires exactly one valid disposition for every supplied source and rejects unknown, duplicate, or missing references, including nested topic and unanswered-reference fields. A reference of an unexpected JSON type is rejected as a validation failure rather than raising an unhandled type error.
+- The provider instructions are a concise numbered semantic contract covering material selection, selectivity, grouping, corrections and supersession, questions/issues, tracked resolution, limitations, actions, uncertainty, and confidence. Only prose that merely restated a deterministic check was dropped: exact-excerpt copying, topic selectivity, and title grounding have no local validator and are retained verbatim. Deterministic grounding, privacy, protected-token, title, retry, cutoff, and runtime behavior are unchanged.
+- Source-only measurement reports UTF-8 bytes separately for instructions, serialized schema, projected synthetic sources, and the exact Hermes structured prompt. On the publication-safe 87-source fixture, Phase 1 reduced those components from `7213 / 13837 / 14850 / 36094` bytes to `3709 / 2472 / 14850 / 21225` bytes. A measured `$defs` variant increased the new schema from 2472 to 2609 bytes, so it was not adopted.
+- No model, protected configuration, runtime state, spool, artifact, SMTP, service, or scheduler was accessed for this phase.
+
+**`0.5.0` — Remove conflicting one-pass lexical question/issue gates.**
+
+- The one-pass actionable model remains responsible for semantic `QUESTION` and `ISSUE` classification. The renderer no longer overrides those schema-valid classifications with English question/request, technical-domain, problem, or resolution word lists.
+- Deterministic validation still requires reader-facing question text to be an exact source excerpt and verifies source ownership, allowed dispositions, topic/unanswered separation, uniqueness, distinct answer evidence, protected values, privacy, and revision-only provenance.
+- The model prompt still forbids recasting announcements, instructions, status statements, and directives as questions and limits unanswered entries to unresolved questions/issues. Semantic quality is checked during isolated artifact review instead of being guessed from vocabulary.
+- The legacy two-stage pipeline and the separate acknowledgement, untrusted-policy-override, confidence, status-recall, and negation controls were unchanged at that time; version `0.7.0` removes them from every production path.
 
 **`0.4.0` — Add cross-day question state and the Phase 3 semantic pilot.**
 
@@ -52,7 +80,7 @@ The prior `0.3.0` release applied the first Phase 2 quality findings:
 
 - The initial 16-run synthetic smoke test used 19 Hermes calls and did not meet the model-quality gates. Sanitized aggregates and remediation are recorded in [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
 - Shared projection redaction now covers `api_token=...`, closing the concrete privacy regression found in both privacy-window prompts.
-- A deterministic recall net requires any declarative, unhedged source statement that something was scheduled, confirmed, moved, postponed, or cancelled to be included or uncertain and assigned to a topic or an unanswered entry. It never dictates particular reader wording, so an over-inclusive match only forces the model to account for the message.
+- Version `0.3.0` added a deterministic recall net requiring any declarative, unhedged source statement that something was scheduled, confirmed, moved, postponed, or cancelled to be included or uncertain and assigned to a topic or an unanswered entry. Version `0.7.0` removes that lexical net: the model now owns that decision, and no vocabulary match can reject a candidate.
 - The privacy corpus now represents actionable guidance as a normal update and a separately stated unresolved problem as unanswered, matching the current schema contract.
 - Focused post-remediation Hermes reruns and human unsupported-content review remain separately approval-gated; model quality is not yet accepted.
 
@@ -68,15 +96,15 @@ The underlying `0.2.0` accuracy and privacy hardening remains in force:
 
 Grounding:
 
-- Substantive reader prose (question, narrative, recommendation, actions, limitation) must be a contiguous, word-bounded, normalized exact source excerpt after identity sanitization; fuzzy matching, cross-source stitching, and mid-word excerpts are rejected.
-- An excerpt that drops an immediately preceding negator is rejected, so a prohibition cannot be rendered as an instruction.
+- Substantive reader prose (question, narrative, recommendation, actions, limitation) must be one complete mechanically delimited normalized source sentence, or the complete normalized source, after identity sanitization; fuzzy matching, cross-source stitching, mid-word excerpts, mid-sentence clauses, and ambiguous spans are rejected.
+- Because every atom is a whole sentence or whole source, a prohibition cannot be rendered as an instruction without maintaining an English negator vocabulary.
 - Protected technical identifiers use exact token occurrence instead of substring containment, covering short and punctuation-bearing forms such as `v2`, `3PAR`, `SRX_345`, `802.11ax`, and `C++17`.
 
-Question and unresolved-issue classification:
+Question and unresolved-issue classification before `0.5.0` (superseded for one-pass rendering):
 
-- A reader-facing question requires a model-declared `QUESTION` kind plus an independent local check on **both** the cited source and the selected excerpt.
-- A bare wh- opening now requires interrogative punctuation, so relative and exclamative clauses are not recast as questions.
-- `ISSUE` entries require an unresolved technical problem signal and reject explicit resolution language unless the source states the problem is still open.
+- A reader-facing question previously required a model-declared `QUESTION` kind plus a local lexical check on both the cited source and selected excerpt.
+- A bare wh- opening previously required interrogative punctuation as part of that local reclassification.
+- `ISSUE` entries previously required a local unresolved-problem vocabulary signal and rejected local resolution phrases. Version `0.5.0` removes these one-pass gates; the legacy two-stage pipeline retains its separate lexical compatibility behavior.
 - Unanswered topic labels are internal metadata and are not rendered; reader status text is derived locally. Unanswered entries are capped at eight.
 
 Privacy:
@@ -130,13 +158,13 @@ all eligible normalized current message revisions
   -> strict local validation and rendering
 ```
 
-Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, word-bounded exact normalized and privacy-sanitized source excerpts, exact protected-token membership, attribution, confidence, and unresolved issues. Excerpts that drop an immediately preceding negator are rejected.
+Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. This is the only pipeline permitted to produce a deliverable candidate. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition.
 
-Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode deterministically excludes messages flagged `mechanical_ack` or `untrusted_policy_override` before constructing the model prompt; if such filtering removes a tracked revision, processing blocks before model construction.
+Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode supplies every normalized current source revision to the model and lets the model dispose of each one; if deterministic normalization removes a tracked revision, processing blocks before model construction.
 
 The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
 
-The one-pass actionable path is structurally isolated into `actionable_schema.py`, `actionable_validate.py`, and `actionable_render.py`. `models.py` retains compatibility entry points for the legacy two-stage pipeline; this source-only split does not change execution modes, model invocation, delivery, or runtime configuration.
+The one-pass actionable path is structurally isolated into `actionable_schema.py`, `actionable_validate.py`, and `actionable_render.py`. `models.py` retains compatibility entry points for the legacy two-stage pipeline. That legacy path still resolves meaning from English vocabulary and is therefore explicitly non-production: `DigestConfig.require_production_pipeline()` blocks it from `delivery-capable` runs, reviewed-artifact registration, and reviewed-artifact delivery.
 
 ### Explicit runner execution modes
 

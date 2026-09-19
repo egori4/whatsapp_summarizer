@@ -88,10 +88,13 @@ class ModelProviderTests(unittest.TestCase):
         calls = []
         model = HermesOpenAICodexModel("gpt-5.6-terra", timeout=17, max_input_bytes=12, max_output_chars=64, reasoning_effort="high", runner=lambda *args, **kwargs: calls.append((args, kwargs)))
 
-        with self.assertRaises(ModelFailure):
+        with self.assertRaises(ModelFailure) as raised:
             model.complete("source-too-large")
 
         self.assertEqual(calls, [])
+        self.assertEqual(raised.exception.diagnostic.category, "prompt_budget")
+        self.assertEqual(raised.exception.diagnostic.stage, "input")
+        self.assertIsNone(raised.exception.diagnostic.child_returncode)
 
     def test_hermes_codex_adapter_reports_when_schema_pushes_structured_input_over_budget(self) -> None:
         calls = []
@@ -110,8 +113,59 @@ class ModelProviderTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "x" * 65, "")
 
         model = HermesOpenAICodexModel("gpt-5.6-terra", timeout=17, max_input_bytes=128, max_output_chars=64, reasoning_effort="high", runner=runner)
-        with self.assertRaises(ModelFailure):
+        with self.assertRaises(ModelFailure) as raised:
             model.complete("bounded source")
+        self.assertEqual(raised.exception.diagnostic.category, "output_budget")
+        self.assertEqual(raised.exception.diagnostic.stdout_bytes, 65)
+
+    def test_hermes_codex_adapter_records_safe_diagnostics_for_child_exit(self) -> None:
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(command, 23, "response-secret", "stderr-secret")
+
+        model = HermesOpenAICodexModel("gpt-5.6-terra", timeout=17, max_input_bytes=128, max_output_chars=64, reasoning_effort="high", runner=runner)
+        with self.assertRaises(ModelFailure) as raised:
+            model.complete("bounded source")
+
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(diagnostic.category, "child_exit")
+        self.assertEqual(diagnostic.stage, "hermes_chat")
+        self.assertEqual(diagnostic.child_returncode, 23)
+        self.assertEqual(diagnostic.stdout_bytes, len("response-secret".encode("utf-8")))
+        self.assertEqual(diagnostic.stderr_bytes, len("stderr-secret".encode("utf-8")))
+        self.assertNotIn("response-secret", str(raised.exception))
+        self.assertNotIn("stderr-secret", str(raised.exception))
+
+    def test_hermes_codex_adapter_records_timeout_without_child_return_code(self) -> None:
+        def runner(command, **kwargs):
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"], output="response-secret", stderr=b"stderr-secret")
+
+        model = HermesOpenAICodexModel("gpt-5.6-terra", timeout=17, max_input_bytes=128, max_output_chars=64, reasoning_effort="high", runner=runner)
+        with self.assertRaises(ModelFailure) as raised:
+            model.complete("bounded source")
+
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(diagnostic.category, "timeout")
+        self.assertEqual(diagnostic.stage, "hermes_chat")
+        self.assertIsNone(diagnostic.child_returncode)
+        self.assertLess(diagnostic.duration_ms, 1000)
+        self.assertEqual(diagnostic.stdout_bytes, len("response-secret".encode("utf-8")))
+        self.assertEqual(diagnostic.stderr_bytes, len(b"stderr-secret"))
+        self.assertNotIn("response-secret", str(raised.exception))
+        self.assertNotIn("stderr-secret", str(raised.exception))
+
+    def test_hermes_codex_adapter_records_empty_output_without_content(self) -> None:
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, "", "stderr-secret")
+
+        model = HermesOpenAICodexModel("gpt-5.6-terra", timeout=17, max_input_bytes=128, max_output_chars=64, reasoning_effort="high", runner=runner)
+        with self.assertRaises(ModelFailure) as raised:
+            model.complete("bounded source")
+
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(diagnostic.category, "empty_output")
+        self.assertEqual(diagnostic.stdout_bytes, 0)
+        self.assertEqual(diagnostic.stderr_bytes, len("stderr-secret".encode("utf-8")))
+        self.assertNotIn("stderr-secret", str(raised.exception))
 
     def test_hermes_codex_adapter_uses_owner_only_file_and_an_empty_toolset(self) -> None:
         captured = {}

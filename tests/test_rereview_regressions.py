@@ -118,8 +118,9 @@ class ReReviewRegressionTests(unittest.TestCase):
         self.assertIn("Technical Updates", result.text)
         self.assertEqual(len(fallback.prompts), 1)
         self.assertIn("REPAIR ATTEMPT", fallback.prompts[0])
-        self.assertIn("JSONDecodeError", fallback.prompts[0])
-        self.assertIn("Do not reproduce or discuss the invalid candidate", fallback.prompts[0])
+        self.assertIn("Failure code: SCHEMA", fallback.prompts[0])
+        self.assertNotIn("JSONDecodeError", fallback.prompts[0])
+        self.assertIn("Do not reproduce or discuss the previous candidate", fallback.prompts[0])
 
     def test_transport_failure_uses_fallback_without_validator_repair_feedback(self):
         class RecordingFallback:

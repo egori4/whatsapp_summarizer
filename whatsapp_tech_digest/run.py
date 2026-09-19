@@ -68,6 +68,7 @@ def deliver_reviewed(policy_path: Path, spool_path: Path, artifact_path: Path, m
     """Send only the exact reviewed artifact; no model construction is permitted."""
     config = DigestConfig.from_dict(json.loads(policy_path.read_text(encoding="utf-8")))
     config.require_live_safe()
+    config.require_production_pipeline()
     try:
         output = artifact_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -104,6 +105,8 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
     config = DigestConfig.from_dict(json.loads(policy_path.read_text(encoding="utf-8")))
     if execution_mode == "delivery-capable":
         config.require_live_safe()
+    if execution_mode == "delivery-capable" or review_manifest is not None:
+        config.require_production_pipeline()
     spool = DurableSpool(spool_path, config.target_group_jid)
     snapshot = spool.snapshot()
     events, run_type, omission = spool.pending_events(snapshot)
@@ -154,16 +157,13 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
     if execution_mode == "validate-only":
         return ""
     if config.models.pipeline_mode == "one_pass":
-        selected = [
-            item for item in normalized
-            if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")
-        ]
+        selected = list(normalized)
         selected_revisions = {
             (str(item["message_id"]), int(item["change_seq"])) for item in selected
         }
         if events and tracked_revisions - selected_revisions:
             raise DeliveryBlockedError(
-                "a tracked revision was removed by deterministic safety filtering; "
+                "a tracked revision was removed by deterministic normalization; "
                 "correct or revoke that source revision before retrying"
             )
         degraded = False
@@ -180,10 +180,16 @@ def generate(policy_path: Path, spool_path: Path, *, execution_mode: str = "vali
     spool.require_current(selected)
     try:
         summarize = summarize_actionable if config.models.pipeline_mode == "one_pass" else summarize_selected
+        final_model = build_model(config.models, "final")
+        fallback_model = (
+            final_model
+            if config.models.fallback == config.models.final
+            else build_model(config.models, "fallback")
+        )
         result = summarize(
             selected,
-            build_model(config.models, "final"),
-            build_model(config.models, "fallback"),
+            final_model,
+            fallback_model,
             degraded,
             final_instruction=config.models.final_instruction,
         )

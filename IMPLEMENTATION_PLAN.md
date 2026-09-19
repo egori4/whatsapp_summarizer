@@ -31,13 +31,13 @@ The digest is still valuable when only unanswered technical questions exist. An 
 
 - Support a two-stage local path and a one-pass Hermes Codex path behind explicit policy selection.
 - Keep complete relevant thread context in the selected pipeline.
-- Use model semantic classification for question and unresolved-issue selection, then independently require the cited source and any selected question excerpt to be a technical question/request. Require interrogative punctuation for a bare wh- opening so relative and exclamative clauses are not read as questions. Require an unresolved technical problem signal for `ISSUE` and reject explicit resolution language.
+- In the one-pass actionable path, use model semantic classification for question and unresolved-issue selection without reclassifying meaning from local English vocabulary. Deterministically require the cited source relationships, `INCLUDE`/`UNCERTAIN` disposition, exact-source question excerpts, non-overlap, uniqueness, and source-backed resolution evidence. Preserve the legacy two-stage lexical checks until that compatibility path is redesigned separately.
 - Require model-cited source references for reader-facing questions and unresolved issues.
 
 ### 4. Local validation and rendering
 
 - Validate dispositions, source ownership, source overlap, exact source excerpts, protected values, attribution, and confidence.
-- Require every reader-facing question, narrative, recommendation, action, and limitation to be one contiguous, word-bounded normalized, privacy-sanitized exact source excerpt. Reject excerpts that drop an immediately preceding negator. Require exact token membership for protected technical identifiers; substring containment is insufficient.
+- Require every reader-facing question, narrative, recommendation, action, and limitation to be one complete mechanically delimited normalized, privacy-sanitized source sentence or the complete source, resolving to exactly one span. Reject mid-sentence, mid-word, stitched, and ambiguous excerpts. Require exact token membership for protected technical identifiers; substring containment is insufficient.
 - Require a semantic `QUESTION` source kind for `Question asked` output.
 - Permit unanswered entries only for a semantic `QUESTION` or `ISSUE` source that remains `INCLUDE` or `UNCERTAIN`.
 - Keep unanswered questions/issues in a dedicated section capped at eight items.
@@ -70,8 +70,8 @@ Operational evidence remains owner-only and outside Git. Public evidence must be
 - Durable spool with immutable-revision and checkpoint safety.
 - Safe model projection/redaction boundary.
 - Selective topic rendering with source-grounded answered and unanswered content.
-- Model-cited semantic question/issue selection rather than lexical-only detection.
-- Deterministic technical-question/issue checks and exact-source-excerpt grounding for reader-facing one-pass prose.
+- Model-owned semantic question/issue selection without local English-vocabulary reclassification in the one-pass path.
+- Deterministic source-relationship, disposition, non-overlap, uniqueness, resolution-evidence, and exact-source-excerpt checks for reader-facing one-pass prose.
 - Reviewed-artifact delivery boundary and explicit execution modes.
 - Publication-safe one-pass quality corpus, deterministic scorer, bounded call accounting, owner-only evidence writer, and validated config/provider model construction.
 - Stable-message/current-revision cross-day state for unanswered questions and declarative issues, with explicit open, partial, and resolved transitions, distinct answer-evidence enforcement, edit/revocation handling, and atomic retention cleanup.

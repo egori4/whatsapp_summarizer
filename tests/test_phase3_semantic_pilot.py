@@ -56,10 +56,7 @@ class Phase3SemanticPilotTests(unittest.TestCase):
                     ],
                     *pending,
                 ]
-                selected = [
-                    item for item in stage_zero(sources)
-                    if not item.get("mechanical_ack") and not item.get("untrusted_policy_override")
-                ]
+                selected = stage_zero(sources)
                 response = json.dumps(day["candidate"])
                 rendered = render_actionable(response, selected)
                 provenance = actionable_provenance(response, selected)

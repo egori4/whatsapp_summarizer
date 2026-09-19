@@ -7,9 +7,20 @@ from .actionable_validate import actionable_source_map
 
 def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     refs = list(actionable_source_map(items))
-    ref = {"type": "string", "enum": refs}
+    ref = {"type": "string"}
     ref_array = {"type": "array", "items": ref, "uniqueItems": True}
     required_ref_array = {**ref_array, "minItems": 1}
+    disposition = {
+        "type": "object", "additionalProperties": False,
+        "required": ["source_ref", "value"],
+        "properties": {
+            "source_ref": ref,
+            "value": {
+                "type": "string",
+                "enum": ["INCLUDE", "EXCLUDE", "CONTEXT", "UNCERTAIN"],
+            },
+        },
+    }
     specific = {
         "type": "object", "additionalProperties": False,
         "required": ["source_ref", "value"],
@@ -56,8 +67,8 @@ def actionable_schema(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "required": ["dispositions", "topics", "unanswered"],
         "properties": {
             "dispositions": {
-                "type": "object", "additionalProperties": False, "required": refs,
-                "properties": {reference: {"type": "string", "enum": ["INCLUDE", "EXCLUDE", "CONTEXT", "UNCERTAIN"]} for reference in refs},
+                "type": "array", "items": disposition,
+                "minItems": len(refs), "maxItems": len(refs),
             },
             "topics": {"type": "array", "maxItems": 8, "items": topic},
             "unanswered": {"type": "array", "maxItems": 8, "items": unanswered},

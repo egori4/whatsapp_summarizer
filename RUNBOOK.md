@@ -52,6 +52,7 @@ Do not print or copy any resulting identity, message, recipient, credential, pat
 
 - `validate-only` is the default and must not invoke a model, send SMTP, create a digest run, or advance a checkpoint.
 - `render-only` may invoke the approved model only after explicit approval. It must use an isolated spool for preview work and must not contact SMTP or mutate production checkpoint state.
+- Only the one-pass pipeline may produce a deliverable candidate. The legacy two-stage pipeline is explicitly non-production and is refused for reviewed-artifact registration, `delivery-capable` runs, and reviewed-artifact delivery.
 - `delivery-capable` can either send an exact reviewed artifact without model regeneration or execute the separately gated unattended generate-and-deliver path. The reviewed-artifact path is the default operational recommendation; unattended use requires its own explicit policy and activation approval.
 
 ## Preview quality review
@@ -64,8 +65,9 @@ For each isolated rendered artifact, check:
 - unanswered technical questions or issues have their own section;
 - greetings, thanks, unrelated chatter, opaque identifiers, numeric sender labels, secrets, and empty headings are absent;
 - no question is invented from an announcement or directive;
-- every reader-facing question, summary, recommendation, action, and limitation is a contiguous excerpt from its declared source window;
-- source negation is preserved, and explicitly fixed/resolved issues are not listed as unanswered;
+- every reader-facing question, summary, recommendation, action, and limitation is one complete sentence of a declared source, or that whole source;
+- source negation, scope, and conditions survive because no clause was cut out of its sentence, and explicitly fixed/resolved issues are not listed as unanswered;
+- generated titles are short, readable, and introduce no version, command, URL, path, identifier, or number that is not already in that topic's own text;
 - internal unanswered topic labels are not rendered, and an unanswered-only window still produces a useful digest;
 - a useful-but-limited workaround is an update with a limitation, not an unanswered item.
 - a limitation is not automatically a partial answer: compare the answer with the actual scope of the tracked question or problem;
@@ -81,11 +83,12 @@ An unanswered-only window should render a digest. An all-empty candidate with ac
 
 1. Do not send mail or advance the checkpoint.
 2. Preserve the failure category and isolated evidence without copying message bodies or identities to public documentation.
-3. Add a deterministic regression test before changing validation or rendering behavior.
-4. Re-run unit tests, then use an isolated render-only replay.
-5. Obtain independent review before an operational retry.
+3. A transport failure category (timeout, stale termination, child exit, empty output, prompt budget, output budget, CLI unavailable) is terminal for the run: exactly one application model call was made and no fallback was attempted. Do not retry without diagnosing the transport cause.
+4. Add a deterministic regression test before changing validation or rendering behavior.
+5. Re-run unit tests, then use an isolated render-only replay.
+6. Obtain independent review before an operational retry.
 
-If the failure says a tracked revision was removed by deterministic safety filtering, do not edit the database or acknowledge the item away. Correct the source message so it is again a valid question, issue, or explicit edited resolution, or revoke it at the source if it should no longer be tracked; then retry only after the new revision has been collected. This recovery changes source state and does not itself authorize a model run, delivery, restart, or scheduling.
+If the failure says a tracked revision was removed by deterministic normalization, do not edit the database or acknowledge the item away. Correct the source message so it is again a valid question, issue, or explicit edited resolution, or revoke it at the source if it should no longer be tracked; then retry only after the new revision has been collected. This recovery changes source state and does not itself authorize a model run, delivery, restart, or scheduling.
 
 ### Delivery uncertainty
 

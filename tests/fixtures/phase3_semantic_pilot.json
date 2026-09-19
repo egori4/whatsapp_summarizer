@@ -12,7 +12,12 @@
         {"message_id": "archive-speculation", "timestamp": "2026-09-11T14:08:00+00:00", "text": "Maybe the team will replace the archive service next quarter."}
       ],
       "candidate": {
-        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE", "S003": "EXCLUDE"},
+        "dispositions": [
+          {"source_ref": "S001", "value": "INCLUDE"},
+          {"source_ref": "S002", "value": "INCLUDE"},
+          {"source_ref": "S003", "value": "EXCLUDE"},
+          {"source_ref": "S004", "value": "EXCLUDE"}
+        ],
         "topics": [
           {
             "topic": "Local search recovery",
@@ -57,7 +62,12 @@
         {"message_id": "day-two-ack", "timestamp": "2026-09-12T14:05:00+00:00", "text": "Thanks for the update."}
       ],
       "candidate": {
-        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE", "S003": "INCLUDE"},
+        "dispositions": [
+          {"source_ref": "S001", "value": "INCLUDE"},
+          {"source_ref": "S002", "value": "INCLUDE"},
+          {"source_ref": "S003", "value": "INCLUDE"},
+          {"source_ref": "S004", "value": "EXCLUDE"}
+        ],
         "topics": [
           {
             "topic": "Compact policy import support",
@@ -104,7 +114,11 @@
         {"message_id": "day-three-ack", "timestamp": "2026-09-13T14:02:00+00:00", "text": "Got it."}
       ],
       "candidate": {
-        "dispositions": {"S001": "INCLUDE", "S002": "INCLUDE"},
+        "dispositions": [
+          {"source_ref": "S001", "value": "INCLUDE"},
+          {"source_ref": "S002", "value": "INCLUDE"},
+          {"source_ref": "S003", "value": "EXCLUDE"}
+        ],
         "topics": [
           {
             "topic": "Archive consistency verification",

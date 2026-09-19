@@ -16,18 +16,15 @@ _PROTECTED_PATH = re.compile(
 _PROTECTED_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_+-])[A-Za-z0-9](?:[A-Za-z0-9_+.-]*[A-Za-z0-9+])?(?![A-Za-z0-9_+-])"
 )
-_LOW_CONFIDENCE = re.compile(
-    r"(?i)\b(?:i think|i believe|i guess|probably|possibly|perhaps|maybe|might|seems?|seemed|"
-    r"apparently|afaik|iirc|if i recall|not sure|unsure|unconfirmed|not confirmed)\b"
-)
 _IDENTITY_LABEL = re.compile(r"^\+?\d[\d\s().-]{5,}$")
 _MENTION_PLACEHOLDER = re.compile(r"\[mentioned participant\]", re.IGNORECASE)
 _PARTICIPANT_PLACEHOLDER = re.compile(r"\[participant identifier\]", re.IGNORECASE)
-# Deliberately over-inclusive: a false positive only forces the model to keep a message.
-_STATUS_CHANGE = re.compile(
-    r"(?i)\b(?:cancell?ed|cancell?ing|cancels|called off|reschedul\w*|schedul\w*|confirm\w*|"
-    r"postpon\w*|deferr\w*|delay\w*|moved|pushed back|brought forward|no longer (?:happening|taking place))\b"
-)
+# Structural syntax only: an opaque per-request source handle must never reach a reader.
+_OPAQUE_SOURCE_REF = re.compile(r"(?<![A-Za-z0-9])S\d{3}(?![A-Za-z0-9])")
+_DIGIT_RUN = re.compile(r"\d+")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?\u2026;])\s+")
+_ATOM_EDGE = " .!?\u2026;"
+_TITLE_MAX_CHARACTERS = 80
 
 
 def actionable_source_map(items: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -37,18 +34,6 @@ def actionable_source_map(items: Sequence[dict[str, Any]]) -> dict[str, dict[str
 
 def source_text(item: Mapping[str, Any]) -> str:
     return str(item.get("redacted_text") or item.get("text") or "")
-
-
-def announces_status_change(text: str) -> bool:
-    """Detect a declarative, unhedged statement that something was scheduled, moved, or called off.
-
-    This is a recall net, not a classifier: its only consequence is that the model must
-    account for the message rather than drop it silently.
-    """
-    return any(
-        "?" not in sentence and not low_confidence(sentence) and _STATUS_CHANGE.search(sentence)
-        for sentence in re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
-    )
 
 
 def _trim_url_punctuation(value: str) -> str:
@@ -97,10 +82,10 @@ def protected_value_occurs(value: str, text: str) -> bool:
 
 def clean_field(value: object, field: str, *, required: bool = False) -> str:
     if not isinstance(value, str):
-        raise ModelFailure(f"{field} must be text")
+        raise ModelFailure(f"{field} must be text", code="SCHEMA")
     cleaned = " ".join(value.split())
     if required and not cleaned:
-        raise ModelFailure(f"{field} must be nonempty")
+        raise ModelFailure(f"{field} must be nonempty", code="SCHEMA")
     return cleaned
 
 
@@ -112,29 +97,68 @@ def clean_reader_field(value: object, field: str, *, required: bool = False) -> 
         or _MENTION_PLACEHOLDER.search(cleaned)
         or _PARTICIPANT_PLACEHOLDER.search(cleaned)
     ):
-        raise ModelFailure("reader-facing identity placeholder")
+        raise ModelFailure("reader-facing identity placeholder", code="PRIVACY")
     return cleaned
 
 
+def _atom_key(value: str) -> str:
+    """Compare atoms without their mechanical sentence-boundary punctuation."""
+    return value.strip().strip(_ATOM_EDGE).strip()
+
+
+def _allowed_spans(normalized: str) -> set[tuple[int, int]]:
+    """The complete normalized source plus every complete mechanically delimited sentence."""
+    if not normalized:
+        return set()
+    spans = {(0, len(normalized))}
+    start = 0
+    for match in _SENTENCE_BREAK.finditer(normalized):
+        if match.start() > start:
+            spans.add((start, match.start()))
+        start = match.end()
+    if start < len(normalized):
+        spans.add((start, len(normalized)))
+    return spans
+
+
 def grounded_reader_text(value: str, evidence: str | Sequence[str]) -> bool:
-    """Return whether reader prose is an exact normalized source excerpt."""
-    normalized_value = " ".join(value.split())
+    """Return whether reader prose resolves to exactly one complete allowed source span.
+
+    A factual atom is a whole sentence or the whole source, so a clause can never be
+    lifted out of the polarity, scope, or condition stated around it.
+    """
+    key = _atom_key(" ".join(value.split()))
+    if not key:
+        return True
     evidence_items = (evidence,) if isinstance(evidence, str) else evidence
-    pattern = re.compile(r"(?<!\w)" + re.escape(normalized_value) + r"(?!\w)")
+    matches = 0
     for item in evidence_items:
         normalized_evidence = " ".join(item.split())
-        for match in pattern.finditer(normalized_evidence):
-            prefix = normalized_evidence[:match.start()]
-            if re.search(r"(?i)\b(?:not|never|don't|don’t|avoid)\s*$", prefix):
-                continue
-            return True
-    return not normalized_value
+        for start, end in _allowed_spans(normalized_evidence):
+            if _atom_key(normalized_evidence[start:end]) == key:
+                matches += 1
+                if matches > 1:
+                    return False
+    return matches == 1
 
 
 def require_grounded_reader_text(value: str, evidence: str | Sequence[str], field: str) -> None:
-    """Require substantive reader prose to be an exact normalized source excerpt."""
+    """Require substantive reader prose to be one unique complete source span."""
     if not grounded_reader_text(value, evidence):
-        raise ModelFailure(f"unsupported {field}: not an exact source excerpt")
+        raise ModelFailure(f"unsupported {field}: not an exact source excerpt", code="GROUNDING")
+
+
+def require_safe_generated_title(title: str, evidence_atoms: Sequence[str]) -> None:
+    """Permit a readable model title that introduces no unvalidated reader-facing fact."""
+    if not 1 <= len(title) <= _TITLE_MAX_CHARACTERS:
+        raise ModelFailure("generated title must be one bounded line", code="TITLE")
+    if _OPAQUE_SOURCE_REF.search(title):
+        raise ModelFailure("generated title exposes an opaque source reference", code="TITLE")
+    evidence = " ".join(evidence_atoms)
+    if any(not protected_value_occurs(value, evidence) for value in protected_values(title)):
+        raise ModelFailure("generated title introduces an unsupported protected value", code="TITLE")
+    if not set(_DIGIT_RUN.findall(title)) <= set(_DIGIT_RUN.findall(evidence)):
+        raise ModelFailure("generated title introduces an unsupported numeral", code="TITLE")
 
 
 def safe_reader_source_text(value: object, field: str) -> str:
@@ -155,7 +179,7 @@ def names(refs: Sequence[str], sources: Mapping[str, Mapping[str, Any]]) -> list
         if not name or _IDENTITY_LABEL.fullmatch(name):
             continue
         if "\n" in name:
-            raise ModelFailure("participant metadata invalid")
+            raise ModelFailure("participant metadata invalid", code="PRIVACY")
         if name not in names:
             names.append(name)
     return names
@@ -197,7 +221,3 @@ def date_label(items: Sequence[dict[str, Any]]) -> str:
     if first.month == last.month and first.year == last.year:
         return f"{first.strftime('%b')} {first.day}–{last.day}"
     return f"{first.strftime('%b')} {first.day}–{last.strftime('%b')} {last.day}"
-
-
-def low_confidence(text: str) -> bool:
-    return _LOW_CONFIDENCE.search(text) is not None

@@ -113,11 +113,8 @@ def load_corpus(path: Path) -> dict[str, Any]:
 
 
 def evaluation_items(window: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Apply the same deterministic one-pass pre-model filtering as the runner."""
-    return [
-        item for item in stage_zero(window["events"])
-        if not item.get("untrusted_policy_override") and not item.get("mechanical_ack")
-    ]
+    """Apply the same deterministic one-pass pre-model normalization as the runner."""
+    return stage_zero(window["events"])
 
 
 def _source_ref_by_message_id(window: Mapping[str, Any]) -> dict[str, str]:

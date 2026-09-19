@@ -208,6 +208,19 @@ class DigestConfig:
     def schedule_activation_allowed(self, observed_local_times: Mapping[str, str]) -> bool:
         return observed_local_times.get("spring") == "08:00" and observed_local_times.get("fall") == "08:00"
 
+    def require_production_pipeline(self) -> None:
+        """Only the redesigned one-pass path may produce a deliverable candidate.
+
+        The legacy two-stage path still decides reader-facing meaning from English
+        word lists, so it is retained for compatibility as an explicitly
+        non-production path rather than as a hidden lexical alternative.
+        """
+        if self.models.pipeline_mode != "one_pass":
+            raise ConfigError(
+                "the legacy two_stage pipeline is explicitly non-production; "
+                "a deliverable candidate requires one_pass"
+            )
+
     def require_live_safe(self) -> None:
         if self.example_only:
             raise ConfigError("sanitized example policy is deliberately not deployable")
