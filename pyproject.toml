@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whatsapp-tech-digest"
-version = "1.0.0"
+version = "1.1.0"
 description = "Offline, fail-closed WhatsApp TechTeam digest reference implementation"
 requires-python = ">=3.11"
 

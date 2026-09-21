@@ -70,11 +70,33 @@ combine deterministic metrics with human judgment:
    failure category and call count, and stop.
 10. A reviewer is read-only unless the operator separately asks that reviewer
     to implement corrections.
+11. The operator decides who reviews a phase, may ask a reviewer to implement
+    its own findings, and may continue in the same session. Acceptance is the
+    operator's decision and is recorded only in the review acceptance record
+    below. Confirm that record before starting a phase that depends on it.
 
 The phase report must always include: files changed, tests run and totals,
 `git diff --check` result, the stated success gate, PASS/FAIL, and any remaining
 blocker. Operational reports must additionally include only sanitized call
 counts, timing categories, byte/token aggregates, and validation categories.
+
+## Review acceptance record
+
+This table is the single source of truth for every "confirm the earlier phase
+was accepted" gate in this plan. A row accepts the tree it names; if that
+phase's source changes afterwards, the operator records a new row. Only the
+operator adds rows.
+
+| Phase | Accepted tree | Basis | Date |
+| --- | --- | --- | --- |
+| 1 | `ab4c8d3` | operator acceptance | 2026-09-20 |
+| 2 | `ab4c8d3` | operator acceptance | 2026-09-20 |
+| 3 | `ab4c8d3` | independent review returned REVISE with three blockers; the same reviewer implemented the fixes at the operator's request; full suite passes | 2026-09-20 |
+| C | `ab4c8d3` plus the current Phase C working diff | independent re-review returned APPROVE after the four-blocker remediation; the post-qualification watchdog/accounting source-fix review returned APPROVE SOURCE FIX; operator acceptance | 2026-09-21 |
+
+Phases 1-3 and Conditional Phase C are accepted against the current working
+tree. That acceptance authorized the first Phase 4 two-call qualification; it
+did not itself authorize the later explicitly approved retry recorded below.
 
 ## Phase map
 
@@ -83,14 +105,15 @@ counts, timing categories, byte/token aggregates, and validation categories.
 | 1 | Compact schema/instructions and add prompt measurements | GPT-5.6 Sol / High | 0 |
 | 2 | Remove lexical semantic gates and fix retry/span/title rules | Claude Opus / High | 0 |
 | 3 | Add bounded-prefix recovery and isolated-to-live artifact binding | GPT-5.6 Sol / High | 0 |
-| 4 | Independent source acceptance and synthetic qualification | GPT-5.6 Terra / High | normally 1, maximum 2 |
-| 5 | Three isolated realistic-window trials and architecture decision | Claude Opus / High | normally 3, maximum 6 |
+| 4 | Independent source acceptance and synthetic qualification | GPT-5.6 Terra / High | one-call: 1; two-call attempts: 1 transport stop, then 3-call validation stop |
+| 5 | Three isolated realistic-window trials and architecture decision | Claude Opus / High | one-call: 3/6; two-call: 6/9 |
 | C | Implement ephemeral two-call path, only after a failed gate | Claude Opus / High | 0 during implementation |
 | 6 | Verify and deliver one exact approved artifact | GPT-5.6 Sol / High | 0 model calls; 1 SMTP attempt |
 
-The maximums in Phases 4 and 5 allow one targeted repair only after a real
-validation rejection. A timeout, stale termination, child exit, empty output,
-or output-budget failure never authorizes another application call.
+The maximums in Phases 4 and 5 allow one targeted repair per attempted window
+only after a real validation rejection. A timeout, stale termination, child
+exit, empty output, or output-budget failure never authorizes another
+application call.
 
 ---
 
@@ -310,6 +333,13 @@ must not contain message text, recipient, credentials, or SMTP data. Because
 provenance contains immutable source identities, the envelope and its parent
 directory remain owner-only and outside Git.
 
+The envelope's own hashes are unkeyed, so they establish integrity against
+corruption, not authenticity. Every fact the envelope asserts that is not
+re-derivable from the artifact bytes, the live policy, or live spool data must
+therefore be independently recomputed from the live spool before it can reach
+SMTP or the durable record. Treat the envelope as a claim to be checked, never
+as evidence in its own right.
+
 ### Execution prompt
 
 **Recommended session model: GPT-5.6 Sol, High reasoning.**
@@ -338,11 +368,19 @@ revision-only delivery facts, not message content or delivery secrets. A
 delivery attempt against the live spool must verify the artifact/envelope
 hashes and schema, policy and target binding, unchanged checkpoint and clear
 delivery state, exact cutoff, and every provenance revision against live data.
-It may register or consume the verified envelope through a tested application
-API, but must never require a model rerun, a render against production, or
-manual database-row copying. It must reject stale, forged, changed, replayed,
-wrong-policy, wrong-target, revoked, superseded, or mismatched evidence before
-SMTP and advance only the live checkpoint after acceptance.
+It must also recompute, rather than trust, every envelope fact that live data
+can establish, including the window's source and candidate counts, its run
+type, and the coverage recorded with the run. It may register or consume the
+verified envelope through a tested application API, but must never require a
+model rerun, a render against production, or manual database-row copying. It
+must reject stale, forged, changed, wrong-policy, wrong-target, revoked, or
+mismatched evidence before SMTP, and must reject replay of a snapshot that was
+already accepted or left unresolved. Verify a bounded window against the prefix
+state at its cutoff: a later edit to an in-prefix source must stay pending
+rather than block the reviewed window, while a revoked source must fail at
+render time and again before SMTP. A transport failure must leave the same
+reviewed artifact retryable without a rerender. Advance only the live
+checkpoint, and only after acceptance.
 
 Do not invoke a model, access a protected spool or policy, render an artifact,
 send SMTP, change services, or change scheduling. Do not add semantic caching,
@@ -353,8 +391,12 @@ provenance mismatch, artifact mismatch, delivery mismatch, exact checkpoint
 advance, rollback/failure, historical labeling, and scheduler denial. Add
 isolated-copy/live-spool tests for altered or absent envelopes, weak file mode,
 wrong target/policy/checkpoint/cutoff, missing or changed provenance revisions,
-revocation/supersession, replay, SMTP failure/uncertainty, live-only checkpoint
-advance after acceptance, and proof that no model or production render occurs.
+revocation before and after the render, a self-consistent envelope whose
+unkeyed hashes were recomputed after its counts or run type were rewritten,
+replay after acceptance and after an unresolved outcome, retry after a
+transport failure, delivery of a bounded window whose in-prefix source was
+later edited, live-only checkpoint advance after acceptance, and proof that no
+model or production render occurs.
 Run focused tests, the full unit suite, and git diff --check. Stop with the
 standard sanitized phase report. Do not start Phase 4.
 ```
@@ -367,8 +409,14 @@ standard sanitized phase report. Do not start Phase 4.
 - Scheduler and unattended paths cannot choose the recovery mode.
 - An isolated render's exact bytes can be verified and delivered through the
   live spool without rerendering or copying database rows manually.
-- A mismatch or stale/replayed envelope fails before SMTP; successful
-  acceptance advances only the live checkpoint to the reviewed cutoff.
+- No envelope-asserted fact that live data can establish is trusted; a
+  self-consistent rewritten envelope fails before SMTP.
+- A bounded window whose in-prefix source was later edited stays deliverable,
+  and that later edit stays pending; a revoked source always fails closed.
+- A mismatch or stale envelope fails before SMTP, replay of an accepted or
+  unresolved snapshot is refused, and a transport failure leaves the same
+  artifact retryable; successful acceptance advances only the live checkpoint
+  to the reviewed cutoff.
 - Full tests and `git diff --check` pass.
 
 ### Independent review prompt
@@ -388,11 +436,12 @@ data, send SMTP, or change services.
 Try to find any path that selects a noncontiguous window, consumes later rows,
 advances beyond the cutoff, loses later corrections, mislabels the artifact,
 lets a scheduled/unattended run choose the cutoff, trusts an isolated database
-row in place of live verification, requires a production render, or advances
-only the isolated copy. Confirm the current isolated-to-live delivery gap is
-actually closed before any provider call. Run focused tests, the full suite,
-and git diff --check. Return APPROVE or REVISE with only concrete blockers and
-file/line references.
+row or an envelope-asserted fact in place of live verification, requires a
+production render, or advances only the isolated copy. Confirm the current
+isolated-to-live delivery gap is actually closed before any provider call, and
+that a bounded window remains deliverable when an in-prefix source was later
+edited. Run focused tests, the full suite, and git diff --check. Return APPROVE
+or REVISE with only concrete blockers and file/line references.
 ```
 
 ---
@@ -422,9 +471,7 @@ Continue the existing WhatsApp Tech Digest worktree. This is a fresh session.
 First read AGENTS.md, HANDOFF.md, README.md, DEPLOYMENT_GUIDE.md, RUNBOOK.md,
 DIGEST_REDESIGN.md, and REDESIGN_IMPLEMENTATION_PLAN.md in full, then follow
 only Phase 4. Inspect git status and the complete existing diff; preserve all
-existing work. Confirm that Phases 1-3 each have an accepted independent
-review, including source-and-test proof that the isolated-to-live artifact
-binding works. If not, stop.
+existing work.
 
 First perform a final read-only review of the complete source diff and run the
 full unit suite plus git diff --check. If either fails, do not invoke Hermes.
@@ -467,6 +514,132 @@ this session.
 Any failure routes to Conditional Phase C. It does not authorize timeout or
 provider-configuration changes.
 
+### Phase 4 outcome
+
+The 2026-09-20 synthetic qualification completed and validated in one
+application call within the configured budget and retained all 19 required
+atoms, with no privacy or supersession failure. It did not pass: review found
+one unresolved-placement error and one known unsupported synthetic sentinel.
+The sanitized verdict is **NOT ELIGIBLE — REQUIRE TWO-CALL**. The operator then
+directed Conditional Phase C. No operator manual PASS was recorded for the
+one-call artifact.
+
+### Phase 4 two-call repeat
+
+Run this repeat only after Conditional Phase C has an accepted independent
+review recorded in the acceptance table. The operator's use of the execution
+prompt below is explicit approval for one extraction call and one
+reconciliation call on the publication-safe synthetic large window, plus at
+most one targeted repair after a genuine validation rejection at either
+boundary. The maximum is three application calls total. A transport failure at
+either stage is terminal and authorizes no further call. This approval permits
+read-only use of the protected policy solely to resolve the already configured
+adapter and model; it does not permit a policy write or protected-spool access.
+
+```text
+Repeat Phase 4 with the accepted Conditional Phase C two-call candidate.
+First read the required public project documents, inspect the complete diff,
+and confirm the acceptance table records an independent APPROVE for Phase C.
+If it does not, stop without accessing protected configuration or invoking
+Hermes. Run the full unit suite and git diff --check; stop if either fails.
+
+Using only publication-safe synthetic fixtures, run exactly one extraction and
+one reconciliation through the existing policy-pinned Hermes GPT-5.6
+Terra/High adapter. Permit one additional application call only after a genuine
+local validation rejection with an allowed closed failure code. Never retry a
+timeout, stale termination, child exit, empty output, prompt/output-budget
+failure, or other transport failure. Do not change policy, timeout, services,
+scheduler, checkpoint, or SMTP state, and do not access any protected spool.
+
+Keep prompts, responses, and the review artifact owner-only outside Git with
+mode 0600. Report only sanitized extraction/reconciliation component bytes,
+available token and timing aggregates, application/internal-attempt counts,
+validation category, and required-atom/fabrication/privacy/resolution/
+supersession results. Stop for operator source-to-output review. Do not claim
+manual PASS, start Phase 5, or deliver.
+```
+
+The repeat passes only when both stages validate within the existing budget,
+all non-excepted required atoms reach the deterministic rendering, and every
+fabrication, privacy, resolution, and supersession gate passes. The operator
+must then record manual artifact PASS and Phase 4 acceptance before Phase 5.
+
+### Phase 4 two-call repeat outcome
+
+The 2026-09-20 source gate passed: the complete candidate diff was accepted,
+all 297 offline unit tests passed, and both staged and unstaged
+`git diff --check` passed. The approved 87-source publication-safe synthetic
+repeat then stopped during extraction after exactly one application call.
+Hermes exited with a transport-class `child_exit` (status 1) after 251,933 ms;
+the wrapper captured 110 stdout bytes and 244 stderr bytes privately. No
+extraction candidate was accepted, Call B was not made, and no validation
+repair or transport retry occurred.
+
+The extraction request measured 817 instruction bytes, 860 schema bytes,
+11,020 projected-source bytes, and 12,891 total provider-facing bytes. Since
+there was no validated extraction, reconciliation bytes, atom recall, and the
+fabrication/privacy/resolution/supersession output gates are not assessable.
+Token and internal-attempt aggregates were unavailable. Detailed evidence and
+the synthetic source-to-output review files remain owner-only outside Git.
+The sanitized result is **NOT ELIGIBLE — TRANSPORT FAILURE**. No operator
+manual artifact PASS is possible for this attempt, and Phase 5 must not start.
+
+Subsequent read-only diagnosis found a Hermes v0.21.3 client-side watchdog
+defect rather than an application prompt-budget or parent-timeout failure. The
+small request used high reasoning effort, but Hermes selected prompt-size-only
+silence fuses and killed three internal attempts after 90, 90, and 60 seconds;
+the socket `ReadError` followed those deliberate closes. Upstream issue
+`#112909` fixed this with a 300-second implicit silence floor for high-or-above
+Codex reasoning plus a follow-up preserving the overall run-budget cap
+(`a6cad512a5`, `ebd106f3ec`). Those two changes are locally backported with a
+failing-then-passing no-network regression and pinned on the local Hermes
+branch at `1e1c0a9c9e`. This remediation does not alter the recorded verdict,
+qualify the candidate, or authorize another model call.
+
+### Phase 4 post-repair repeat outcome
+
+The operator then explicitly approved one further isolated repeat. Its source
+gate again passed all 297 offline tests and both staged and unstaged diff
+checks. The protected policy remained read-only and supplied only the existing
+Hermes adapter, model, effort, and budget settings; the candidate pipeline was
+selected explicitly for the synthetic evaluation without a policy write.
+
+The repaired client completed Call A in 97,778 ms. Its 12,891 provider-facing
+bytes comprised the same 817 instruction, 11,020 projected-source, and 860
+schema bytes, and local extraction validation accepted 24 grounded atoms.
+Call B completed in 125,793 ms with 10,315 provider-facing bytes but failed the
+local `DISPOSITION` invariant because a reader-facing atom was not accounted as
+`INCLUDE` or `UNCERTAIN`. The one permitted closed-code reconciliation repair
+completed in 110,071 ms with 10,604 provider-facing bytes and failed the same
+invariant. Total elapsed time was 333,647 ms across exactly three application
+calls. No transport retry occurred; token and internal-attempt aggregates were
+unavailable.
+
+Because neither reconciliation candidate validated, no deterministic rendering
+was accepted and required-atom, fabrication, privacy, resolution, and
+supersession output gates are not assessable. No manual artifact PASS is
+possible. The sanitized result is **NOT ELIGIBLE — VALIDATION FAILURE**. The
+watchdog transport defect is fixed, but the two-call candidate remains
+unqualified and Phase 5 must not start. Detailed evidence remains owner-only
+outside Git.
+
+Read-only comparison of both rejected plans found the same concrete mismatch:
+each rendered 22 atoms while accounting six of those reader-facing atoms as
+`CONTEXT`. The prompt had stated only that every `INCLUDE` or `UNCERTAIN` atom
+must be rendered, while the validator correctly enforced the reciprocal rule
+as well. A failing-then-passing regression now protects explicit instructions
+that every reader-facing atom must be `INCLUDE` or `UNCERTAIN`, `CONTEXT` is
+non-rendered only, and `EXCLUDE` cannot appear in a topic or unanswered entry.
+This source-only fix
+does not alter the failed verdict or authorize another model call.
+
+Independent read-only review returned **APPROVE SOURCE FIX** after verifying the
+Hermes backport against both upstream commits, the prompt/validator accounting
+equivalence, repair bounds, boundary safety, fail-first regressions, public
+documentation, 298 digest tests, and 102 focused no-network Hermes tests. The
+operator accepted that reviewed source fix on 2026-09-21. This acceptance does
+not qualify Phase 4 or authorize a further model call.
+
 ### Independent review prompt
 
 **Recommended reviewer: Claude Sonnet, High/extended thinking.**
@@ -497,9 +670,11 @@ Decide the architecture on representative data rather than one lucky run.
 
 The operator's use of the execution prompt below is explicit approval to read
 the protected policy and production spool only for read-only preflight, three
-fresh owner-only SQLite-consistent isolated copies, and one initial render-only
-digest call per frozen window. One targeted validation repair per window is
-allowed; transport retries are not. It is not delivery approval.
+fresh owner-only SQLite-consistent isolated copies, and the selected
+candidate's normal application calls per frozen window. One targeted
+validation repair per window is allowed; transport retries are not. This is a
+maximum of six calls for one-pass or nine for two-call. It is not delivery
+approval.
 
 Window selection is a separate no-runtime-model setup step. Before the first
 digest call, the operator must approve and freeze an owner-only manifest
@@ -561,12 +736,13 @@ fresh owner-only SQLite-consistent isolated spool copies matching those
 definitions; do not mutate production. Keep all copies, artifacts, manifests,
 and metadata outside Git, owner-only, mode 0600.
 
-Run exactly one initial render-only compact-one-call attempt per window through
-the existing policy-pinned Hermes GPT-5.6 Terra/High adapter. A window may make
-one additional call only for a genuine validator rejection using an allowed
-closed repair code. Never retry a timeout, stale termination, child exit, empty
-output, or output-budget failure. Every attempted window counts; do not replace
-a failed or unfavorable window.
+Run the accepted Phase 4 candidate through the existing policy-pinned Hermes
+GPT-5.6 Terra/High adapter. A one-pass window normally makes one call; a
+two-call window normally makes one extraction and one reconciliation call. A
+window may make one additional call only for a genuine validator rejection
+using an allowed closed repair code. Never retry a timeout, stale termination,
+child exit, empty output, or output-budget failure. Every attempted window
+counts; do not replace a failed or unfavorable window.
 
 Do not contact SMTP, advance or edit the production checkpoint, change policy
 or timeout settings, restart services, alter the scheduler, or clean up
@@ -577,8 +753,10 @@ on the operator's behalf.
 Return the standard sanitized report with each deterministic result,
 application-call count, timing/token aggregates when available, and private
 review artifact locations. If all three deterministic runs pass, report
-AWAITING OPERATOR REVIEW. A failed run reports REQUIRE TWO-CALL. Stop. Do not
-deliver or implement another architecture in this session.
+AWAITING OPERATOR REVIEW. A failed one-call run reports REQUIRE TWO-CALL; a
+failed two-call run reports CANDIDATE NOT ACCEPTED. Stop. Do not deliver or
+implement another architecture in this session.
+Once you finish, update documentation, if REDESIGN_IMPLEMENTATION_PLAN.md needs changes in this or future phases, update it.
 ```
 
 ### Success gate
@@ -593,7 +771,7 @@ deliver or implement another architecture in this session.
   technical coverage, unsupported facts, unanswered/resolved placement,
   limitations, corrections, supersession, privacy, and usefulness, and records
   PASS for each window.
-- Only three clean passes select the compact one-call architecture.
+- Only three clean passes select the accepted Phase 4 candidate architecture.
 
 ### Independent review prompt
 
@@ -617,8 +795,10 @@ from sanitized timing/attestation evidence that exactly three
 operator-approved cutoffs were frozen before the first digest call and were not
 altered or replaced (`window_count=3`, `approved_hash_matched=true`, and
 `frozen_before_first_call=true`). Return APPROVE SELECT ONE-CALL, APPROVE
-REQUIRE TWO-CALL, or REVISE with only sanitized concrete blockers. This review
+SELECT TWO-CALL, APPROVE REQUIRE TWO-CALL (only for a failed one-call
+candidate), or REVISE with only sanitized concrete blockers. This review
 is not artifact acceptance and not delivery approval.
+
 ```
 
 ---
@@ -679,6 +859,27 @@ sanitized report; do not qualify or deliver.
 All extraction and reconciliation fields have exact local accounting;
 invalid atoms never reach Call B; factual rendering cannot invent prose; no new
 semantic persistence exists; and full tests/diff check pass.
+
+### Phase C implementation status
+
+The 2026-09-20 source implementation and review remediation passed 297 offline
+unit tests and both staged and unstaged `git diff --check`. It added no semantic
+persistence and made no model, protected-spool, SMTP, service, or scheduler
+call. Overbroad
+read-only documentation searches matched non-secret pipeline-mode lines in the
+ignored protected policy and owner-only handoff; nothing was modified.
+Therefore the source success gate was met, but that session was not recorded as
+a clean procedural PASS. The candidate remained unqualified and unselected.
+
+The first independent review returned `REVISE` with four blockers. The current
+tree remediates them by binding candidate count to every normalized source,
+enforcing source-wide topic/unanswered ownership, requiring `tracked_item` for
+the edited-`UPDATE` self-resolution exception, and excluding the policy-sourced
+final instruction from reconciliation and its closed-code repair. Fifteen
+focused Phase C tests pass. Independent re-review and operator acceptance are
+complete: the re-review returned `APPROVE`, and the operator accepted Phase C
+on 2026-09-20. The subsequent Phase 4 repeats are recorded above; the candidate
+is not qualified or selected.
 
 ### Independent review prompt
 
@@ -741,7 +942,8 @@ service, or change scheduling.
 Verify the Phase 3 portable-envelope path still binds these exact reviewed
 bytes from the isolated consistent copy to the current unchanged live
 checkpoint, policy hash, immutable source revisions, cutoff, and delivery
-state. Verify the approved artifact and envelope are still byte/hash identical,
+state, and that the window facts the envelope asserts still match the live
+spool. Verify the approved artifact and envelope are still byte/hash identical,
 owner-only, and not stale. If any link is absent or uncertain, return BLOCKED
 with the sanitized category; do not improvise a transfer, rerender, or copy
 database rows manually. Otherwise return READY FOR SEPARATE DELIVERY APPROVAL.
@@ -762,23 +964,27 @@ printing protected values.
 
 Do not invoke a model or rerender. Reverify artifact hash/bytes, portable
 envelope schema/hash, policy hash, immutable source revisions, exact cutoff,
-current checkpoint, target binding, recipient binding, and unresolved delivery
-state. If any check differs, stop before SMTP and report only the sanitized
-mismatch category.
+current checkpoint, target binding, recipient binding, unresolved delivery
+state, and the live-recomputed source count, candidate count, and run type for
+the window. If any check differs, stop before SMTP and report only the
+sanitized mismatch category.
 
 If every check matches, make exactly one SMTP delivery attempt for the approved
-bytes. Never retry automatically. Advance the checkpoint only after confirmed
-SMTP acceptance and only to the artifact's bound cutoff. Preserve owner-only
-evidence. Do not restart services, change policy, alter scheduling, clean up
-evidence, or deliver any later window. Report only sanitized delivery category,
-SMTP-attempt count, and checkpoint-transition category.
+bytes. Never retry automatically. A transport failure may be retried only after
+the operator separately approves a further attempt for the same exact bytes; an
+unresolved outcome must go to reconciliation instead. Advance the checkpoint
+only after confirmed SMTP acceptance and only to the artifact's bound cutoff.
+Preserve owner-only evidence. Do not restart services, change policy, alter
+scheduling, clean up evidence, or deliver any later window. Report only
+sanitized delivery category, SMTP-attempt count, and checkpoint-transition
+category.
 ```
 
 ### Success gate
 
 - Zero model calls and no rerender.
 - The delivered bytes equal the approved artifact exactly.
-- Exactly one SMTP attempt.
+- Exactly one SMTP attempt per delivery approval, with no automatic retry.
 - Checkpoint advances only after acceptance and only to the bound cutoff.
 - Any uncertainty stops before delivery or checkpoint change.
 

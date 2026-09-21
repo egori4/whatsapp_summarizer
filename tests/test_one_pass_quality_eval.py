@@ -28,9 +28,9 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         package = (ROOT / "whatsapp_tech_digest" / "__init__.py").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertRegex(project, r'(?m)^version = "1\.0\.0"$')
-        self.assertRegex(package, r'(?m)^__version__ = "1\.0\.0"$')
-        self.assertIsNotNone(re.search(r"\| `1\.0\.0` \|.*\(current\)", readme))
+        self.assertRegex(project, r'(?m)^version = "1\.1\.0"$')
+        self.assertRegex(package, r'(?m)^__version__ = "1\.1\.0"$')
+        self.assertIsNotNone(re.search(r"\| `1\.1\.0` \|.*\(current\)", readme))
 
     def test_corpus_has_eight_synthetic_windows_and_declared_coverage(self) -> None:
         corpus = load_corpus(CORPUS)

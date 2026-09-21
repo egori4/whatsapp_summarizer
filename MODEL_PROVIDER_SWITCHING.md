@@ -49,6 +49,8 @@ For this provider, set `"reasoning_effort"` explicitly in policy. The adapter pa
 
 Set `"pipeline_mode": "one_pass"` only with `hermes-openai-codex` to skip the local preclassifier entirely. The runner normalizes/redacts the current durable message revisions, sends the complete resulting source window to the Hermes final model, and requires a disposition for every source. Hermes is instructed to group related sources internally into discussion threads, retain supporting content inside a relevant thread, and omit only whole irrelevant threads from the reader-facing sections. There is no timestamp-neighbor context expansion and no Ollama call in this mode.
 
+The Conditional Phase C candidate uses `"pipeline_mode": "two_call"` with the same Hermes-only connector restriction and also skips the preclassifier. Its extractor sees the complete projected window; only locally validated exact evidence atoms and structural context reach reconciliation. It normally uses two application calls and permits one validation-only repair across the whole pipeline, never a transport retry. This source path remains unqualified and unselected until its independent review and repeated qualification gates pass.
+
 ## Example cloud-policy shape
 
 ```json

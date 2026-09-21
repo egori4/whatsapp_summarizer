@@ -6,7 +6,7 @@ A safety-gated collector and technical-digest pipeline for one explicitly approv
 
 **Read [`HANDOFF.md`](HANDOFF.md) and [`AGENTS.md`](AGENTS.md) before making changes.** This public repository intentionally contains only sanitized source, tests, and examples; live target identity, runtime state, and operational evidence remain owner-only and Git-ignored.
 
-The merged implementation provides a selective one-pass Hermes digest, compact renderer, and exact-source topic questions and conclusions. The published artifact is not a deployment: policy installation, service activation, scheduling, model execution, and delivery remain separate operator-controlled actions.
+The source includes both the compact one-pass Hermes digest and the Conditional Phase C ephemeral extractor/reconciler candidate. The published artifact is not a deployment: policy installation, candidate qualification, service activation, scheduling, model execution, and delivery remain separate operator-controlled actions.
 
 Before publishing or deploying any change:
 
@@ -20,7 +20,8 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `1.0.0` | Operator-only bounded-prefix recovery and portable isolated-review-to-live delivery binding (current) |
+| `1.1.0` | Ephemeral two-call extraction/reconciliation candidate with validated atoms and deterministic rendering (current) |
+| `1.0.0` | Operator-only bounded-prefix recovery and portable isolated-review-to-live delivery binding |
 | `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair |
 | `0.6.0` | Compact one-call dispositions, instructions, and prompt byte measurements |
 | `0.5.0` | One-pass semantic question/issue authority; remove conflicting local lexical gates |
@@ -168,20 +169,26 @@ all eligible normalized current message revisions
   -> strict local validation and rendering
 ```
 
-Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. This is the only pipeline permitted to produce a deliverable candidate. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition.
+Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. This remains the compact actionable baseline, although its failed Phase 4 gate makes it ineligible for selection. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition.
 
-Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. One-pass mode supplies every normalized current source revision to the model and lets the model dispose of each one; if deterministic normalization removes a tracked revision, processing blocks before model construction.
+#### Ephemeral two-call Hermes Codex candidate
+
+Set `"pipeline_mode": "two_call"` only with the same Hermes connector and policy-pinned model/reasoning settings. Call A sees the complete allowlisted projected window and returns one disposition per source plus exact evidence atoms. Local validation blocks unsupported atoms before Call B. Call B sees only validated atoms and structural context, returns no factual prose, and the local renderer inserts exact atoms into its plan. The path stores no semantic cache or ledger, bypasses the legacy preclassifier, normally uses two application calls, and permits at most one closed-code validation repair for a maximum of three. Transport or empty-output failure is terminal. Phase C source review is accepted. The first two-call Phase 4 repeat exposed the installed Hermes v0.21.3 high-effort small-prompt watchdog defect; the upstream effort-aware correction (`a6cad512a5`, `ebd106f3ec`) is pinned on the local Hermes branch at `1e1c0a9c9e` and covered by a no-network regression. An approved post-repair repeat confirmed that all three permitted provider calls can now complete, but both reconciliation candidates failed the same local `DISPOSITION` invariant after extraction validated 24 atoms. No rendered artifact was accepted. The prompt's previously one-way accounting rule now explicitly matches the validator's bidirectional contract and has a regression test, but the candidate remains unqualified and unselected as `NOT ELIGIBLE — VALIDATION FAILURE`; another model run requires separate approval.
+
+Phase C review remediation binds reviewed-artifact candidate counts to the complete normalized window, applies topic/unanswered ownership to whole source revisions rather than individual atoms, permits self-resolution only for an edited tracked `UPDATE`, and keeps policy-sourced final instructions out of Call B and its repair. Independent re-review returned `APPROVE`, and the operator recorded acceptance before the provider-backed repeats.
+
+Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. Both actionable modes supply every normalized current source revision to their first model stage and let that stage dispose of each one; if deterministic normalization removes a tracked revision, processing blocks before model construction.
 
 The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
 
-The one-pass actionable path is structurally isolated into `actionable_schema.py`, `actionable_validate.py`, and `actionable_render.py`. `models.py` retains compatibility entry points for the legacy two-stage pipeline. That legacy path still resolves meaning from English vocabulary and is therefore explicitly non-production: `DigestConfig.require_production_pipeline()` blocks it from `delivery-capable` runs, reviewed-artifact registration, and reviewed-artifact delivery.
+The one-pass actionable path is structurally isolated into `actionable_schema.py`, `actionable_validate.py`, and `actionable_render.py`; the two-call candidate is isolated in `ephemeral_two_call.py` and reuses the same local safety helpers. `models.py` retains compatibility entry points for the legacy two-stage pipeline. That legacy path still resolves meaning from English vocabulary and is therefore explicitly non-production: `DigestConfig.require_production_pipeline()` blocks it from `delivery-capable` runs, reviewed-artifact registration, and reviewed-artifact delivery.
 
 ### Explicit runner execution modes
 
 The runner does not use an ambiguous `dry_run` switch. It accepts `--execution-mode` and defaults to the safest mode:
 
 - `validate-only` (default): parses policy, snapshots the spool, checks omissions/current revisions, and performs deterministic normalization. It never builds a model, sends SMTP, records a digest run, or advances a checkpoint.
-- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. With explicit review artifact and envelope paths it writes both as owner-only files. It never sends SMTP, records a digest run, or advances a checkpoint. In one-pass Hermes Codex mode, only the allowlisted redacted source projection crosses the local Hermes CLI/provider boundary.
+- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. With explicit review artifact and envelope paths it writes both as owner-only files. It never sends SMTP, records a digest run, or advances a checkpoint. In actionable Hermes modes, only allowlisted redacted sources or locally validated atom projections cross the local Hermes CLI/provider boundary.
 - `delivery-capable`: is the only mode permitted to call SMTP or persist digest-run/checkpoint outcomes. It invokes `require_live_safe()` and remains subject to the separate live-policy and operational-approval gates; selecting it in source does not authorize activation or delivery.
 
 Read-only state commands (`--health`, `--status`, `--purge`, and reconciliation commands) do not accept a non-default execution mode.
@@ -241,13 +248,13 @@ It is better to omit minor discussion than flood the digest with low-value chatt
 7. **No automated schedule yet.** Scheduling/activation remains separately gated.
 8. **Fail closed.** Source-coverage, revocation, schema, grounding, model, or delivery uncertainty blocks checkpoint advancement.
 9. **Separate approvals.** Artifact acceptance does not authorize merge, deployment, restart, target restoration, inference activation, SMTP, scheduling, or cleanup.
-10. **Revision-only provenance.** A validated one-pass digest that reaches accepted or delivery-unknown state stores a hash-bound, owner-only topic-to-immutable-revision envelope. It contains no message text, participant display name, reader-facing prose, URL, or model rationale; failed candidates never receive trusted provenance.
+10. **Revision-only provenance.** A validated actionable digest that reaches accepted or delivery-unknown state stores a hash-bound, owner-only topic-to-immutable-revision envelope. It contains no message text, participant display name, reader-facing prose, URL, or model rationale; failed candidates never receive trusted provenance.
 
 ## Documentation map
 
 - `AGENTS.md` — mandatory durable rules for any coding model.
 - `HANDOFF.md` — current development and live-runtime facts, evidence, gaps, and next approval gates.
-- `MODEL_PROVIDER_SWITCHING.md` — provider, one-pass, explicit reasoning, and credential-boundary behavior.
+- `MODEL_PROVIDER_SWITCHING.md` — provider, actionable pipeline, explicit reasoning, and credential-boundary behavior.
 - `ARCHITECTURE_THREAT_MODEL.md` — components, trust boundaries, assets, and controls.
 - `DEPLOYMENT_GUIDE.md` — staged deployment and rollback boundaries.
 - `RUNBOOK.md` — operational verification and incident procedures.

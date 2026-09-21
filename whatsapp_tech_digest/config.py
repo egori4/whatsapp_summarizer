@@ -158,8 +158,8 @@ class DigestConfig:
         model_data = _object(data.get("models"), "models", {"provider", "pipeline_mode", "preclassifier", "preclassifier_digest", "final", "final_digest", "fallback", "fallback_digest", "timeout_seconds", "batch_size", "context_limit", "noise_threshold", "endpoint", "api_key_env", "reasoning_effort", "max_output_tokens", "max_output_chars", "classifier_instruction", "final_instruction"})
         provider = model_data.get("provider", "ollama")
         pipeline_mode = model_data.get("pipeline_mode", "two_stage")
-        if pipeline_mode not in {"two_stage", "one_pass"}:
-            raise ConfigError("models.pipeline_mode must be two_stage or one_pass")
+        if pipeline_mode not in {"two_stage", "one_pass", "two_call"}:
+            raise ConfigError("models.pipeline_mode must be two_stage, one_pass, or two_call")
         if provider not in {"ollama", "openai", "anthropic", "hermes-openai-codex"}:
             raise ConfigError("models.provider must be ollama, openai, anthropic, or hermes-openai-codex")
         api_key_env = model_data.get("api_key_env")
@@ -190,8 +190,8 @@ class DigestConfig:
             raise ConfigError("anthropic provider requires an HTTPS endpoint")
         if models.provider == "hermes-openai-codex" and models.endpoint != "local://hermes-cli":
             raise ConfigError("hermes-openai-codex requires the exact local://hermes-cli connector endpoint")
-        if models.pipeline_mode == "one_pass" and models.provider != "hermes-openai-codex":
-            raise ConfigError("one_pass mode is restricted to the Hermes Codex provider")
+        if models.pipeline_mode in {"one_pass", "two_call"} and models.provider != "hermes-openai-codex":
+            raise ConfigError("one_pass and two_call modes are restricted to the Hermes Codex provider")
         external_data = _object(data.get("external_fallback"), "external_fallback", {"enabled", "approved", "reduced_bundle_only"})
         external = ExternalFallbackPolicy(external_data.get("enabled") is True, external_data.get("approved") is True, external_data.get("reduced_bundle_only") is True)
         if external.enabled and not (external.approved and external.reduced_bundle_only):
@@ -209,16 +209,16 @@ class DigestConfig:
         return observed_local_times.get("spring") == "08:00" and observed_local_times.get("fall") == "08:00"
 
     def require_production_pipeline(self) -> None:
-        """Only the redesigned one-pass path may produce a deliverable candidate.
+        """Only a redesigned actionable path may produce a deliverable candidate.
 
         The legacy two-stage path still decides reader-facing meaning from English
         word lists, so it is retained for compatibility as an explicitly
         non-production path rather than as a hidden lexical alternative.
         """
-        if self.models.pipeline_mode != "one_pass":
+        if self.models.pipeline_mode not in {"one_pass", "two_call"}:
             raise ConfigError(
                 "the legacy two_stage pipeline is explicitly non-production; "
-                "a deliverable candidate requires one_pass"
+                "a deliverable candidate requires one_pass or two_call"
             )
 
     def require_live_safe(self) -> None:

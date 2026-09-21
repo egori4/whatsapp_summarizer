@@ -15,7 +15,7 @@ A future schema migration may either wire a field with deterministic tests or re
 - `target_group_jid` and `whatsapp.group_allow_from`: parsed and required to be the same sole immutable group identifier; used to bind the spool and collector boundary.
 - `silence`: parsed as fixed all-output-deny invariants; the collector runtime enforces the corresponding collector-only boundary.
 - `paths.spool` and `paths.state_dir`: consumed by the collector plugin at registration to create and bind its durable spool. The command runner separately takes explicit `--spool` and lock paths.
-- `models.provider`, model IDs, endpoint, timeouts, batch/context/output limits, instructions, and reasoning effort: parsed; consumed by model construction or local prompt/model limits. One-pass is restricted to the Hermes Codex connector.
+- `models.provider`, `models.pipeline_mode`, model IDs, endpoint, timeouts, batch/context/output limits, instructions, and reasoning effort: parsed; consumed by model construction or local prompt/model limits. The actionable `one_pass` and `two_call` modes are restricted to the Hermes Codex connector; the legacy `two_stage` mode remains non-production.
 - `external_fallback`: parsed as a fail-closed invariant; any enabled value is rejected.
 - `smtp`: parsed; used only by the separately gated delivery path. SMTP settings alone do not authorize delivery.
 

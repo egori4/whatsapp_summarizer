@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from .config import DigestConfig
+from .ephemeral_two_call import extract_evidence, summarize_ephemeral_two_call
 from .model_provider import build_model
 from .models import LocalModel, summarize_actionable, stage_zero
 
@@ -218,6 +219,32 @@ def score_candidate(
     }
 
 
+def _two_call_scoring_response(
+    extraction: str, reconciliation: str, items: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Project an accepted structural plan onto the existing synthetic rubric."""
+    atoms = {atom["atom_ref"]: atom for atom in extract_evidence(extraction, items)}
+    plan = json.loads(reconciliation)
+    return {
+        "topics": [
+            {
+                "question_source_ref": (
+                    atoms[entry["question_atom_ref"]]["source_ref"]
+                    if entry.get("question_atom_ref") else None
+                ),
+                "limitation": entry.get("limitation_atom_refs") or [],
+            }
+            for entry in plan.get("topics", [])
+            if isinstance(entry, Mapping)
+        ],
+        "unanswered": [
+            {"question_source_ref": atoms[entry["atom_ref"]]["source_ref"]}
+            for entry in plan.get("unanswered", [])
+            if isinstance(entry, Mapping) and entry.get("atom_ref") in atoms
+        ],
+    }
+
+
 class _RecordingModel:
     def __init__(self, role: str, delegate: LocalModel) -> None:
         self.role = role
@@ -265,10 +292,11 @@ def evaluate_window(
     final_model: LocalModel,
     fallback_model: LocalModel,
     *,
+    pipeline_mode: str = "one_pass",
     final_instruction: str = "",
     artifact_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Execute one isolated one-pass window and return only sanitized metrics.
+    """Execute one isolated candidate window and return only sanitized metrics.
 
     Detailed prompts, raw candidates, validation errors, and the rendered digest
     are written only to the explicitly supplied owner-only artifact path.
@@ -276,23 +304,34 @@ def evaluate_window(
     if not isinstance(run_index, int) or isinstance(run_index, bool) or run_index < 1:
         raise ValueError("run_index must be a positive integer")
     items = evaluation_items(window)
-    final = _RecordingModel("final", final_model)
-    fallback = _RecordingModel("fallback", fallback_model)
+    if pipeline_mode not in {"one_pass", "two_call"}:
+        raise ValueError("evaluation pipeline_mode must be one_pass or two_call")
+    final_role, fallback_role = (
+        ("extractor", "reconciler") if pipeline_mode == "two_call" else ("final", "fallback")
+    )
+    final = _RecordingModel(final_role, final_model)
+    fallback = _RecordingModel(fallback_role, fallback_model)
     rendered = ""
     response_data: Mapping[str, Any] | None = None
     failure_category: str | None = None
     failure_detail: str | None = None
     try:
-        result = summarize_actionable(
+        summarize = summarize_ephemeral_two_call if pipeline_mode == "two_call" else summarize_actionable
+        result = summarize(
             items, final, fallback, False, final_instruction=final_instruction,
         )
         rendered = result.text
-        selected_responses = final.responses if result.model == "final" else fallback.responses
-        if rendered and selected_responses:
-            decoded = json.loads(selected_responses[-1])
-            if not isinstance(decoded, Mapping):
-                raise ValueError("accepted candidate must decode to an object")
-            response_data = decoded
+        if pipeline_mode == "two_call" and rendered and final.responses and fallback.responses:
+            response_data = _two_call_scoring_response(
+                final.responses[-1], fallback.responses[-1], items,
+            )
+        elif rendered:
+            selected_responses = final.responses if result.model == "final" else fallback.responses
+            if selected_responses:
+                decoded = json.loads(selected_responses[-1])
+                if not isinstance(decoded, Mapping):
+                    raise ValueError("accepted candidate must decode to an object")
+                response_data = decoded
     except Exception as exc:
         failure_category = type(exc).__name__
         failure_detail = str(exc)
@@ -308,7 +347,9 @@ def evaluate_window(
         "material": bool(window["material"]),
         "accepted": accepted,
         "model_calls": final.calls + fallback.calls,
-        "repair_or_fallback_used": fallback.calls > 0,
+        "repair_or_fallback_used": (
+            final.calls + fallback.calls > 2 if pipeline_mode == "two_call" else fallback.calls > 0
+        ),
         "failure_category": failure_category,
         "score": score,
     }
@@ -317,16 +358,16 @@ def evaluate_window(
             "window_id": str(window["id"]),
             "run_index": run_index,
             "prompts": [
-                *({"role": "final", "text": prompt} for prompt in final.prompts),
-                *({"role": "fallback", "text": prompt} for prompt in fallback.prompts),
+                *({"role": final_role, "text": prompt} for prompt in final.prompts),
+                *({"role": fallback_role, "text": prompt} for prompt in fallback.prompts),
             ],
             "raw_responses": [
-                *({"role": "final", "text": response} for response in final.responses),
-                *({"role": "fallback", "text": response} for response in fallback.responses),
+                *({"role": final_role, "text": response} for response in final.responses),
+                *({"role": fallback_role, "text": response} for response in fallback.responses),
             ],
             "model_error_categories": [
-                *({"role": "final", "category": error} for error in final.errors),
-                *({"role": "fallback", "category": error} for error in fallback.errors),
+                *({"role": final_role, "category": error} for error in final.errors),
+                *({"role": fallback_role, "category": error} for error in fallback.errors),
             ],
             "validation_failure_detail": failure_detail,
             "rendered_digest": rendered,
@@ -342,6 +383,7 @@ def evaluate_corpus(
     artifact_dir: Path,
     *,
     repeats: int = 2,
+    pipeline_mode: str = "one_pass",
     final_instruction: str = "",
     window_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -368,7 +410,8 @@ def evaluate_corpus(
             evidence_path = artifact_dir / f"run-{sequence:02d}-{window['id']}-r{run_index}.json"
             results.append(evaluate_window(
                 window, run_index, final_model, fallback_model,
-                final_instruction=final_instruction, artifact_path=evidence_path,
+                pipeline_mode=pipeline_mode, final_instruction=final_instruction,
+                artifact_path=evidence_path,
             ))
     _write_owner_only_json(artifact_dir / "results.json", {
         "schema_version": 1,
@@ -388,6 +431,8 @@ def aggregate_results(
     manual_reviews: Mapping[str, Mapping[str, Any]],
     *,
     expected_runs: int,
+    normal_calls: int = 1,
+    maximum_calls: int = 2,
 ) -> dict[str, Any]:
     """Build a publication-safe aggregate without prompts, responses, or digests."""
     material = [result for result in results if result["material"]]
@@ -410,7 +455,7 @@ def aggregate_results(
         int(manual_reviews[key].get("unsupported_accepted_count", 0))
         for key in required_review_keys & set(manual_reviews)
     )
-    material_retry_count = sum(int(result["model_calls"] > 1) for result in material)
+    material_retry_count = sum(int(result["model_calls"] > normal_calls) for result in material)
     material_failure_count = sum(int(not result["accepted"]) for result in material)
     nonmaterial_accepted_count = sum(int(result["accepted"]) for result in nonmaterial)
     completed = len(results) == expected_runs
@@ -438,7 +483,7 @@ def aggregate_results(
         "evaluation_runs": len(results),
         "expected_runs": expected_runs,
         "model_invocations": sum(int(result["model_calls"]) for result in results),
-        "maximum_model_invocations": expected_runs * 2,
+        "maximum_model_invocations": expected_runs * maximum_calls,
         "reliability_interpretation": "exploratory_repeatability_only",
         "material_runs": len(material),
         "material_retry_count": material_retry_count,
@@ -464,8 +509,8 @@ def load_evaluation_models(policy_path: Path):
     config = DigestConfig.from_dict(json.loads(policy_path.read_text(encoding="utf-8")))
     if not config.example_only:
         raise ValueError("quality evaluation requires a publication-safe example-only policy")
-    if config.models.pipeline_mode != "one_pass" or config.models.provider != "hermes-openai-codex":
-        raise ValueError("quality evaluation requires the one-pass Hermes Codex provider")
+    if config.models.pipeline_mode not in {"one_pass", "two_call"} or config.models.provider != "hermes-openai-codex":
+        raise ValueError("quality evaluation requires an actionable Hermes Codex provider")
     if config.models.endpoint != "local://hermes-cli":
         raise ValueError("quality evaluation requires the local Hermes CLI connector")
     if (
@@ -477,7 +522,7 @@ def load_evaluation_models(policy_path: Path):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the isolated synthetic one-pass quality evaluation")
+    parser = argparse.ArgumentParser(description="Run the isolated synthetic digest quality evaluation")
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--policy", type=Path, required=True)
     parser.add_argument("--artifact-dir", type=Path, required=True)
@@ -497,6 +542,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     window_ids = set(args.window_ids) if args.window_ids else None
     results = evaluate_corpus(
         corpus, final_model, fallback_model, args.artifact_dir,
+        pipeline_mode=config.models.pipeline_mode,
         final_instruction=config.models.final_instruction,
         window_ids=window_ids,
     )
@@ -506,6 +552,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     summary = aggregate_results(
         results, {}, expected_runs=len(selected) * 2,
+        normal_calls=2 if config.models.pipeline_mode == "two_call" else 1,
+        maximum_calls=3 if config.models.pipeline_mode == "two_call" else 2,
     )
     print(json.dumps(summary, sort_keys=True))
     return 0

@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 from .config import DigestConfig
+from .ephemeral_two_call import summarize_ephemeral_two_call
 from .model_provider import build_model
 from .models import ModelFailure, high_recall_select, stage_zero, summarize_actionable, summarize_selected
 from .smtp_delivery import send
@@ -336,7 +337,7 @@ def generate(
         carried = spool.carry_forward_events(snapshot)
     else:
         carried = spool.carry_forward_events(snapshot, allow_later_changes=True)
-    if carried and config.models.pipeline_mode != "one_pass":
+    if carried and config.models.pipeline_mode not in {"one_pass", "two_call"}:
         raise DeliveryBlockedError("cross-day question state requires the one-pass actionable pipeline")
     tracked_revisions = {(str(item["message_id"]), int(item["change_seq"])) for item in carried}
     events = _merge_carried_events(events, carried)
@@ -347,7 +348,7 @@ def generate(
     normalized = stage_zero(events)
     if execution_mode == "validate-only":
         return ""
-    if config.models.pipeline_mode == "one_pass":
+    if config.models.pipeline_mode in {"one_pass", "two_call"}:
         selected = list(normalized)
         selected_revisions = {
             (str(item["message_id"]), int(item["change_seq"])) for item in selected
@@ -373,7 +374,10 @@ def generate(
     else:
         spool.require_current(selected, cutoff_seq=bounded_cutoff)
     try:
-        summarize = summarize_actionable if config.models.pipeline_mode == "one_pass" else summarize_selected
+        summarize = {
+            "one_pass": summarize_actionable,
+            "two_call": summarize_ephemeral_two_call,
+        }.get(config.models.pipeline_mode, summarize_selected)
         final_model = build_model(config.models, "final")
         fallback_model = (
             final_model
@@ -391,7 +395,7 @@ def generate(
         if execution_mode == "delivery-capable":
             spool.record_run(snapshot, run_type, "failed", omission_note=omission, candidate_count=len(selected), source_count=len(events), config_hash=_config_hash(policy_path), coverage_snapshot=json.dumps(spool.coverage()))
         raise
-    if result.text and config.models.pipeline_mode == "one_pass":
+    if result.text and config.models.pipeline_mode in {"one_pass", "two_call"}:
         if result.provenance is None:
             raise DeliveryBlockedError("a rendered candidate requires validated provenance")
         spool.validate_provenance(

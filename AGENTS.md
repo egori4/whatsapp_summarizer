@@ -32,7 +32,7 @@ Read `HANDOFF.md`, `README.md`, and the local deployment documentation before ma
 
 ## Digest contract
 
-- One-pass mode uses the policy-pinned Hermes Codex local adapter, with explicit reasoning and bounded prompt/output sizes.
+- Actionable `one_pass` and `two_call` modes use the policy-pinned Hermes Codex local adapter, with explicit reasoning and bounded prompt/output sizes.
 - Preserve source-grounded technical questions, commands, versions, repositories, and URLs.
 - Separate unresolved technical questions from answered topics.
 - Do not invent conclusions or upgrade informal guidance into confirmed documentation.
