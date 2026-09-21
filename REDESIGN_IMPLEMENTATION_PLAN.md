@@ -92,7 +92,7 @@ operator adds rows.
 | 1 | `ab4c8d3` | operator acceptance | 2026-09-20 |
 | 2 | `ab4c8d3` | operator acceptance | 2026-09-20 |
 | 3 | `ab4c8d3` | independent review returned REVISE with three blockers; the same reviewer implemented the fixes at the operator's request; full suite passes | 2026-09-20 |
-| C | `ab4c8d3` plus the current Phase C working diff | independent re-review returned APPROVE after the four-blocker remediation; the post-qualification watchdog/accounting source-fix review returned APPROVE SOURCE FIX; operator acceptance | 2026-09-21 |
+| C | `108e531` plus `9bbec2d` | independent re-review returned APPROVE after the four-blocker remediation; the post-qualification watchdog/accounting review returned APPROVE SOURCE FIX; the ownership delta review returned APPROVE OWNERSHIP DELTA; operator acceptance | 2026-09-21 |
 
 Phases 1-3 and Conditional Phase C are accepted against the current working
 tree. That acceptance authorized the first Phase 4 two-call qualification; it
@@ -639,6 +639,18 @@ equivalence, repair bounds, boundary safety, fail-first regressions, public
 documentation, 298 digest tests, and 102 focused no-network Hermes tests. The
 operator accepted that reviewed source fix on 2026-09-21. This acceptance does
 not qualify Phase 4 or authorize a further model call.
+
+The reviewer also made a non-blocking observation that source-wide ownership
+was enforced locally but not stated in the reconciliation instructions. Before
+another qualification attempt, the operator directed that residual mismatch
+to be closed. A fail-first prompt-contract assertion now passes after adding an
+explicit rule that all atoms from one source belong to at most one topic or
+unanswered entry. Focused independent review returned **APPROVE OWNERSHIP
+DELTA**, and the operator accepted it on 2026-09-21. The source/test delta is
+committed at `9bbec2d`; the full 298-test suite and staged/unstaged diff checks
+pass. It made no model or operational call and does not alter the failed Phase
+4 verdict. A final Phase 4 qualification gate is prepared but requires separate
+explicit model-run approval.
 
 ### Independent review prompt
 
