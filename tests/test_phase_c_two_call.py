@@ -310,6 +310,10 @@ class PhaseCTwoCallTests(unittest.TestCase):
             "EXCLUDE atoms must not appear in any topic or unanswered entry.",
             prompt,
         )
+        self.assertIn(
+            "All atoms from one source must belong to at most one topic or unanswered entry.",
+            prompt,
+        )
 
     def test_policy_instruction_never_crosses_into_reconciliation_or_its_repair(self):
         policy_sentinel = "POLICY_SENTINEL_DO_NOT_FORWARD"
