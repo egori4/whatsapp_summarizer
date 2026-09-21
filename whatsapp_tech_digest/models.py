@@ -72,6 +72,7 @@ class DigestResult:
     model: str
     degraded: bool
     provenance: dict[str, Any] | None = None
+    empty_validated: bool = False
 
 
 _REPAIR_CODES = frozenset({

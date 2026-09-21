@@ -427,7 +427,12 @@ def generate(
             return output
         return result.text
     if not result.text:
-        spool.record_run(snapshot, run_type, "empty", omission_note=omission, candidate_count=0, source_count=len(events), model_id=result.model, config_hash=_config_hash(policy_path), coverage_snapshot=json.dumps(spool.coverage()))
+        spool.record_run(
+            snapshot, run_type, "empty", omission_note=omission,
+            candidate_count=0, source_count=len(events), model_id=result.model,
+            config_hash=_config_hash(policy_path), coverage_snapshot=json.dumps(spool.coverage()),
+            allow_active_empty=result.empty_validated,
+        )
         return ""
     digest_id = spool.record_run(snapshot, run_type, "failed", omission_note=omission, candidate_count=len(result.included_message_ids), source_count=len(events), model_id=result.model, config_hash=_config_hash(policy_path), coverage_snapshot=json.dumps(spool.coverage()))
     spool.require_current(selected)

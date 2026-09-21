@@ -917,9 +917,11 @@ class DurableSpool:
             "window_kind": window_kind,
         }
 
-    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, omission_checkpoint_seq: int | None = None, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None, allow_later_changes: bool = False) -> str:
+    def record_run(self, snapshot: Mapping[str, int], run_type: str, smtp_state: str, output: str | None = None, message_id: str | None = None, omission_note: str | None = None, *, omission_checkpoint_seq: int | None = None, candidate_count: int = 0, source_count: int = 0, model_id: str | None = None, config_hash: str | None = None, coverage_snapshot: str | None = None, provenance: Mapping[str, Any] | None = None, allow_later_changes: bool = False, allow_active_empty: bool = False) -> str:
         if smtp_state not in self._STATES:
             raise ValueError("invalid SMTP state")
+        if allow_active_empty and smtp_state != "empty":
+            raise ValueError("active empty permission applies only to an empty run")
         checkpoint, cutoff = int(snapshot["checkpoint_seq"]), int(snapshot["cutoff_seq"])
         if omission_checkpoint_seq is not None and not omission_note:
             raise ValueError("an omission checkpoint requires an omission note")
@@ -929,7 +931,7 @@ class DurableSpool:
         content_hash = hashlib.sha256((output or "").encode()).hexdigest()
         if provenance is not None and (smtp_state not in {"accepted", "unknown"} or not output):
             raise ValueError("trusted provenance requires a nonempty validated delivery candidate")
-        if smtp_state == "empty" and self._snapshot_has_active_sources(snapshot):
+        if smtp_state == "empty" and not allow_active_empty and self._snapshot_has_active_sources(snapshot):
             raise DeliveryBlockedError(
                 "an active source snapshot cannot advance as an empty digest"
             )

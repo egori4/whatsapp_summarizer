@@ -35,7 +35,7 @@ def _policy(path: Path, *, password_env: str = "DIGEST_SMTP_PASSWORD") -> Path:
                 },
                 "schedule": {
                     "timezone": "America/Toronto",
-                    "expression": "0 8 * * *",
+                    "expression": "30 7 * * *",
                     "activate_only_after_dst_contract": True,
                 },
                 "retention": {"raw_days": 7, "digest_days": 90},
@@ -191,6 +191,6 @@ class UnattendedAutomationTests(TestCase):
     def test_timer_unit_is_daily_toronto_wall_clock_and_never_catches_up_late(self) -> None:
         unit = build_timer_unit()
 
-        self.assertIn("OnCalendar=*-*-* 08:00:00 America/Toronto", unit)
+        self.assertIn("OnCalendar=*-*-* 07:30:00 America/Toronto", unit)
         self.assertIn("Persistent=false", unit)
         self.assertIn("Unit=whatsapp-tech-digest.service", unit)

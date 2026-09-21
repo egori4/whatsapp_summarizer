@@ -83,9 +83,12 @@ def render_actionable(response: str, items: Sequence[dict[str, Any]]) -> str:
         or len(topics) > 8
         or not isinstance(unanswered, list)
         or len(unanswered) > 8
-        or (not topics and not unanswered)
     ):
         raise ModelFailure("actionable topics or unanswered list invalid", code="SCHEMA")
+    if not topics and not unanswered:
+        if not sources or any(value != "EXCLUDE" for value in dispositions.values()):
+            raise ModelFailure("empty actionable result requires every source to be excluded", code="DISPOSITION")
+        return ""
 
     assigned: set[str] = set()
     update_blocks: list[str] = []
@@ -510,7 +513,10 @@ def _call_provider(model: LocalModel, prompt: str, schema: dict[str, Any]) -> st
 def _render_result(response: str, selected: Sequence[dict[str, Any]], name: str, degraded: bool) -> DigestResult:
     rendered = render_actionable(response, selected)
     provenance = actionable_provenance(response, selected)
-    return DigestResult(rendered, _ids(selected), name, degraded, provenance)
+    return DigestResult(
+        rendered, _ids(selected), name, degraded, provenance,
+        empty_validated=not rendered,
+    )
 
 
 def _safe_failure_diagnostic(exc: Exception, category: str, stage: str) -> ModelDiagnostic:

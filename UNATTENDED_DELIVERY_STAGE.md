@@ -8,7 +8,7 @@ The live production policy remains outside this repository. Runtime installation
 
 ## Intended runtime contract
 
-- Daily schedule: `08:00` in `America/Toronto` via systemd `OnCalendar`.
+- Daily schedule: `07:30` in `America/Toronto` via systemd `OnCalendar`.
 - Missed-run behavior: `Persistent=false`; the service must not send a late catch-up digest after downtime.
 - Recipient and transport: fixed only by the protected policy. The service exposes no recipient or SMTP-host override.
 - Secret bridge: reads exactly one named password from an existing owner-only credential source, maps it only to the policy's SMTP password reference for the process lifetime, then restores the prior environment. It does not copy, write, log, or import other source variables.
@@ -29,7 +29,7 @@ The focused tests cover:
 
 Before installing or enabling anything, perform a fresh read-only preflight:
 
-1. verify the next two `systemd-analyze calendar` occurrences for `08:00 America/Toronto`, including DST-transition evidence;
+1. verify the next two `systemd-analyze calendar` occurrences for `07:30 America/Toronto`, including DST-transition evidence;
 2. verify the dedicated production spool received a post-restart non-owner group event and its owner-only permissions;
 3. verify the selected Python runtime can import the checked-out package and resolve the Hermes CLI through the intended user profile;
 4. compare non-secret SMTP host/port/sender policy fields against the approved reuse source and verify a one-to-one source-key mapping without printing any secret;

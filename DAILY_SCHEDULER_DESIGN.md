@@ -8,26 +8,31 @@ The staged production policy selects the dedicated owner-only state directory `d
 
 ## Intended cadence
 
-- Wall-clock schedule: **08:00 every day**
+- Wall-clock schedule: **07:30 every day**
 - Time zone: **America/Toronto**
 - Recipient: existing fixed policy recipient
 - Model path: Hermes Codex one-pass, with explicit policy-pinned reasoning/output bounds
 
-The policy retains `activate_only_after_dst_contract=true`. Before any timer activation, the final timer implementation must prove that both Toronto DST transition probes resolve to 08:00 local time.
+The policy retains `activate_only_after_dst_contract=true`. Before any timer activation, the final timer implementation must prove that both Toronto DST transition probes resolve to 07:30 local time.
 
 ## Delivery modes
 
-### Recommended: scheduled render, separately approved exact delivery
+### Recommended: reviewed-artifact delivery
 
-At 08:00, an inactive future timer would invoke the normal unbounded path and write an owner-only dated artifact plus portable review envelope. It must never supply or infer a bounded cutoff, contact SMTP, create trusted delivery provenance, or advance the checkpoint. After human review, a separately approved `delivery-capable --deliver-reviewed-artifact` action sends only the exact envelope-bound bytes after live-spool validation.
+Render and review an exact owner-only artifact before separately approving its
+delivery. This preserves the tested reviewed-artifact security boundary, but it
+is not an unattended automatic-email workflow.
 
-This preserves the tested reviewed-artifact security boundary.
-
-### Available but not recommended by default: unattended automatic email
+### Available: unattended automatic email
 
 The repository contains an inert unattended wrapper and systemd-unit generator capable of a `delivery-capable` model-and-SMTP run. That path does not satisfy the reviewed-artifact gate because a human does not review the exact bytes before submission. Source availability does not authorize installation, activation, model execution, or delivery.
 
-If unattended delivery is chosen, it requires an explicit policy decision accepting that reduced review boundary, fresh source review, DST verification, protected-credential verification, and a separate activation approval.
+At 07:30, the timer invokes that normal unbounded delivery path. It must never
+supply or infer a bounded cutoff. A failed run leaves the checkpoint unchanged.
+
+Unattended delivery requires an explicit policy decision accepting the reduced
+review boundary, fresh source review, DST verification, protected-credential
+verification, and a separate activation approval.
 
 ## Required activation sequence
 

@@ -894,6 +894,15 @@ class ActionableDigestTests(unittest.TestCase):
         rendered = render_actionable(_actionable_json(response), self.sources())
         self.assertNotIn("Thanks!", rendered)
 
+    def test_all_excluded_sources_render_as_an_empty_actionable_result(self):
+        response = {
+            "dispositions": {f"S{index:03d}": "EXCLUDE" for index in range(1, 9)},
+            "topics": [],
+            "unanswered": [],
+        }
+
+        self.assertEqual(render_actionable(_actionable_json(response), self.sources()), "")
+
     def test_unanswered_rejects_context_disposition_for_question_or_context_refs(self):
         response = self.response()
         response["dispositions"]["S005"] = "CONTEXT"

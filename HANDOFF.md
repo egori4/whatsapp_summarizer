@@ -22,6 +22,13 @@ Not present in Git:
 
 ## Current source hardening
 
+- Version `1.2.0` permits a scheduled actionable run to advance without SMTP
+	only when the model returns complete disposition coverage with every source
+	explicitly `EXCLUDE` and no topics or unanswered entries. The renderer marks
+	that result as validated empty; the runner records an `empty` run and advances
+	the checkpoint without constructing an email. Any malformed response or any
+	non-`EXCLUDE` disposition without a valid rendered structure remains a
+	terminal validation failure.
 - Version `1.1.0` implements the unqualified Conditional Phase C candidate. Call A covers every projected source and emits exact grounded evidence atoms; each atom is validated and locally annotated with disposition, structural values, chronology, opaque relationships, and tracked/edit state before Call B. Call B sees only that validated projection and emits a fully accounted structural plan. Deterministic rendering can use factual prose only from the validated atoms.
 - Normal two-call execution is two application calls. One validation-only closed-code repair may occur at either boundary, for a total maximum of three; transport and empty-output failures are terminal. The path adds no semantic cache, ledger, preclassifier, batching, credential route, policy change, or operational state.
 - The first independent Phase C review returned `REVISE` with four concrete blockers. Remediation now counts every normalized source revision in reviewed-artifact candidate binding, enforces source-wide ownership across topics and unanswered entries, limits UPDATE self-resolution to edited tracked revisions, and prevents policy-sourced final instructions from entering reconciliation or its repair. Focused regressions cover all four findings; independent re-review returned `APPROVE`, and the operator recorded Phase C acceptance on 2026-09-20.

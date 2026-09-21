@@ -79,7 +79,10 @@ For each isolated rendered artifact, check:
 - edited tracked items remain represented by their current revision, while revoked items disappear from carry-forward and return to normal raw-retention handling;
 - carried items do not expand the reader-facing date label beyond the current source window.
 
-An unanswered-only window should render a digest. An all-empty candidate with active source revisions must remain pending; the current source does not authorize an unattended no-material checkpoint advance.
+An unanswered-only window should render a digest. An all-nonmaterial window may
+advance without SMTP only after the actionable model explicitly assigns every
+source `EXCLUDE` and returns no topics or unanswered entries. Any malformed or
+partly material empty candidate remains pending.
 
 ## Incident handling
 

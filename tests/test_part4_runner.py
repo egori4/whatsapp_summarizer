@@ -576,6 +576,34 @@ class Part4RunnerTests(unittest.TestCase):
             digest_id = spool.connection.execute("SELECT digest_id FROM digest_runs").fetchone()[0]
             self.assertEqual(spool.provenance(digest_id)["provenance"], payload)
 
+    def test_validated_all_exclude_run_advances_without_smtp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = json.loads((Path(__file__).parents[1] / "config" / "digest.policy.example.json").read_text())
+            policy.update({"example_only": False})
+            policy["whatsapp"] = {**policy["whatsapp"], "bridge_port": 17778}
+            policy["paths"] = {"spool": str(root / "spool.sqlite3"), "state_dir": str(root), "mode": "0700"}
+            policy["models"].update({
+                "provider": "hermes-openai-codex", "pipeline_mode": "one_pass",
+                "final": "gpt-5.6-terra", "fallback": "gpt-5.6-terra", "endpoint": "local://hermes-cli",
+                "preclassifier_digest": "sha256:" + "0" * 64,
+                "final_digest": "sha256:" + "1" * 64,
+                "fallback_digest": "sha256:" + "2" * 64,
+            })
+            policy["smtp"].update({"host": "smtp.invalid.test", "sender": "digest@invalid.test"})
+            policy_path = root / "policy.json"
+            policy_path.write_text(json.dumps(policy))
+            spool = run.DurableSpool(root / "spool.sqlite3", policy["target_group_jid"])
+            spool.append_message({"chat_jid": policy["target_group_jid"], "message_id": "chatter", "participant": "15551234567@s.whatsapp.net", "timestamp": "2026-09-01T12:00:00+00:00", "text": "Thanks everyone."})
+            result = DigestResult("", [], "gpt-5.6-terra", False, {"schema_version": "actionable-provenance-v2", "topics": [], "unanswered": []}, True)
+
+            with patch("whatsapp_tech_digest.run.build_model", return_value=object()), patch("whatsapp_tech_digest.run.summarize_actionable", return_value=result), patch("whatsapp_tech_digest.run.send") as send:
+                self.assertEqual(run.generate(policy_path, root / "spool.sqlite3", execution_mode="delivery-capable"), "")
+
+            send.assert_not_called()
+            self.assertEqual(tuple(spool.connection.execute("SELECT checkpoint_seq, delivery_state FROM checkpoints").fetchone()), (1, "clear"))
+            self.assertEqual(spool.connection.execute("SELECT smtp_state FROM digest_runs").fetchone()[0], "empty")
+
     def test_omitted_durable_changes_block_smtp_before_any_send(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

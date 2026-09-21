@@ -136,8 +136,8 @@ class DigestConfig:
             raise ConfigError("whatsapp policy must be an exact sole-JID allowlist/ignore/no-read-receipt policy")
 
         schedule = _object(data.get("schedule"), "schedule", {"timezone", "expression", "activate_only_after_dst_contract"})
-        if schedule != {"timezone": "America/Toronto", "expression": "0 8 * * *", "activate_only_after_dst_contract": True}:
-            raise ConfigError("schedule must be 0 8 * * * America/Toronto with DST activation gate")
+        if schedule != {"timezone": "America/Toronto", "expression": "30 7 * * *", "activate_only_after_dst_contract": True}:
+            raise ConfigError("schedule must be 30 7 * * * America/Toronto with DST activation gate")
         retention = _object(data.get("retention"), "retention", {"raw_days", "digest_days"})
         if retention != {"raw_days": 7, "digest_days": 90}:
             raise ConfigError("retention must be raw_days=7 and digest_days=90")
@@ -207,7 +207,7 @@ class DigestConfig:
         return cls(1, example_only, jid, silence, dict(whatsapp), dict(schedule), dict(retention), dict(paths), runtime, health, dict(contacts), dict(redaction), models, external, smtp)
 
     def schedule_activation_allowed(self, observed_local_times: Mapping[str, str]) -> bool:
-        return observed_local_times.get("spring") == "08:00" and observed_local_times.get("fall") == "08:00"
+        return observed_local_times.get("spring") == "07:30" and observed_local_times.get("fall") == "07:30"
 
     def require_production_pipeline(self) -> None:
         """Only a redesigned actionable path may produce a deliverable candidate.

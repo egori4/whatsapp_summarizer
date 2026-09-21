@@ -4,7 +4,7 @@
   "target_group_jid": "10000000-00000001@g.us",
   "silence": {"collector_consume": true, "bridge_deny_all_post": true, "operation_scope": ["send", "edit", "media", "poll", "location", "typing", "read", "progress", "unknown"]},
   "whatsapp": {"mode": "allowlist", "group_policy": "allowlist", "group_allow_from": ["10000000-00000001@g.us"], "require_mention": false, "unauthorized_dm": "ignore", "send_read_receipts": false, "bridge_port": 0},
-  "schedule": {"timezone": "America/Toronto", "expression": "0 8 * * *", "activate_only_after_dst_contract": true},
+  "schedule": {"timezone": "America/Toronto", "expression": "30 7 * * *", "activate_only_after_dst_contract": true},
   "retention": {"raw_days": 7, "digest_days": 90},
   "paths": {"spool": "/nondeployable-example/spool.sqlite3", "state_dir": "/nondeployable-example", "mode": "0700"},
   "runtime": {"lock_seconds": 900, "max_runtime_seconds": 3600},

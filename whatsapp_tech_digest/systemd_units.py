@@ -62,12 +62,12 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 
 def build_timer_unit() -> str:
-    """Build but do not install the fixed 08:00 Toronto timer unit."""
+    """Build but do not install the fixed 07:30 Toronto timer unit."""
     return f"""[Unit]
-Description=Run WhatsApp Tech Digest at 08:00 Toronto time
+Description=Run WhatsApp Tech Digest at 07:30 Toronto time
 
 [Timer]
-OnCalendar=*-*-* 08:00:00 America/Toronto
+OnCalendar=*-*-* 07:30:00 America/Toronto
 Persistent=false
 Unit={SERVICE_NAME}.service
 

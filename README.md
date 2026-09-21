@@ -20,7 +20,8 @@ The project uses semantic versioning. The single source of truth is `version` in
 
 | Version | Scope |
 | --- | --- |
-| `1.1.0` | Ephemeral two-call extraction/reconciliation candidate with validated atoms and deterministic rendering (current) |
+| `1.2.0` | Explicit all-exclude actionable windows advance as empty without SMTP; malformed or partly material candidates still fail closed (current) |
+| `1.1.0` | Ephemeral two-call extraction/reconciliation candidate with validated atoms and deterministic rendering |
 | `1.0.0` | Operator-only bounded-prefix recovery and portable isolated-review-to-live delivery binding |
 | `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair |
 | `0.6.0` | Compact one-call dispositions, instructions, and prompt byte measurements |
@@ -41,6 +42,25 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 
 ## Current Version-Controlled Change
 
+**`1.2.0` — Advance explicitly all-nonmaterial actionable windows without email.**
+
+- An actionable window advances as `empty` only when every supplied source is
+  explicitly `EXCLUDE` and no topic or unanswered item is returned. That
+  validated outcome sends no email and advances the checkpoint without
+  constructing an SMTP message.
+- Any malformed result, empty result with missing disposition coverage, or
+  result containing an `INCLUDE`, `UNCERTAIN`, or `CONTEXT` source still fails
+  closed and leaves the checkpoint unchanged.
+
+## Prior Version-Controlled Changes
+
+**`1.1.0` — Add the Conditional Phase C ephemeral two-call candidate.**
+
+- Call A emits complete source dispositions and exact evidence atoms. Local
+  validation rejects unsupported or unaccounted atoms before Call B receives a
+  factual projection. Call B returns a structural plan rendered from those
+  validated atoms only. The candidate remains unqualified for deployment.
+
 **`1.0.0` — Add bounded-prefix recovery and portable reviewed-artifact delivery.**
 
 - An operator may select one explicit durable cutoff strictly after the checkpoint and no later than the latest durable change. The runner validates the nonempty contiguous prefix before constructing a model and binds that cutoff through event selection, provenance, artifact identity, delivery, and checkpoint advancement.
@@ -49,8 +69,6 @@ Only sanitized source, tests, examples, and documentation are committed. Policy,
 - Delivery through the live spool validates the exact artifact bytes, envelope schema/hash, policy and target bindings, unchanged checkpoint and clear delivery state, exact cutoff, immutable live revisions, and one-time consumption before SMTP. Because the envelope hashes are unkeyed, its source count, candidate count, and run type are additionally recomputed from live sources and its coverage metadata is replaced by live coverage in the durable record, so a rewritten envelope cannot assert unverified facts. It invokes no model and performs no production render. Accepted SMTP advances only the live checkpoint to the reviewed cutoff; failure or uncertainty does not advance it. An unresolved or already-accepted snapshot is terminal, while a transport failure leaves the exact same reviewed artifact retryable.
 - A bounded window is verified against the prefix state at its cutoff, so a later edit to an in-prefix source does not block delivery and remains pending for a subsequent digest. A revoked source always blocks, before the model call at render time and again at delivery time.
 - This phase was implemented and tested entirely offline. It did not invoke a model, access protected configuration or spools, render an operational artifact, contact SMTP, change a service, or alter scheduling.
-
-## Prior Version-Controlled Changes
 
 **`0.7.0` — Harden semantics, grounding, and failure handling.**
 
@@ -129,7 +147,11 @@ Other:
 - Generated systemd units use `%h` instead of an embedded home path.
 - Restored the publication-safe [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md), [`RUNBOOK.md`](RUNBOOK.md), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
-Known limitation: an all-nonmaterial active window stays pending instead of advancing an empty checkpoint. This is fail-closed and is scheduled for the isolated quality-evaluation phase before unattended operation.
+An all-nonmaterial active window advances only when the actionable model returns
+complete source coverage with every disposition explicitly `EXCLUDE` and no
+topics or unanswered entries. It produces no email. Any malformed response or
+any `INCLUDE`, `UNCERTAIN`, or `CONTEXT` source without a valid rendered
+structure still fails closed and keeps the checkpoint unchanged.
 
 These are inert source artifacts. They do not install or enable units, access credentials, run a model, send email, or activate a schedule. Production policy, runtime state, credentials, rendered artifacts, and activation evidence remain owner-only and Git-ignored.
 
@@ -143,7 +165,7 @@ Approved WhatsApp group (exact immutable JID)
   -> deterministic normalization/redaction
   -> selected digest pipeline
   -> local rendered artifact
-  -> fixed-recipient SMTP (future; separate approval)
+  -> fixed-recipient SMTP (approved delivery-capable execution)
 ```
 
 ### Supported digest modes

@@ -449,6 +449,18 @@ class Part2StateEngineTests(unittest.TestCase):
         self.assertEqual(spool.snapshot()["checkpoint_seq"], 0)
         self.assertEqual(spool.connection.execute("SELECT COUNT(*) FROM digest_runs").fetchone()[0], 0)
 
+    def test_validated_empty_actionable_snapshot_can_advance(self) -> None:
+        spool = self.spool()
+        spool.append_message(event())
+        snapshot = spool.snapshot()
+
+        spool.record_run(
+            snapshot, "first-run", "empty", source_count=1,
+            allow_active_empty=True,
+        )
+
+        self.assertEqual(spool.snapshot()["checkpoint_seq"], 1)
+
     def test_purge_retains_uncheckpointed_raw_versions(self) -> None:
         spool = self.spool()
         spool.append_message(event())
