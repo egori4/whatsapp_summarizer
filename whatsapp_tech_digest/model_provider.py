@@ -131,17 +131,20 @@ class AnthropicMessagesModel(_CloudModel):
         raise ModelFailure("Anthropic response did not contain text")
 
 
-class HermesOpenAICodexModel:
-    """Stateless, tool-free local Hermes CLI adapter backed by stored Codex OAuth."""
+class HermesCLIModel:
+    """Stateless, tool-free local Hermes CLI adapter with explicit provider routing."""
 
-    def __init__(self, model: str, *, timeout: int, max_input_bytes: int, max_output_chars: int, reasoning_effort: str = "medium", runner: Callable[..., subprocess.CompletedProcess[str]] | None = None) -> None:
+    def __init__(self, model: str, *, provider: str = "openai-codex", timeout: int, max_input_bytes: int, max_output_chars: int, reasoning_effort: str = "medium", runner: Callable[..., subprocess.CompletedProcess[str]] | None = None) -> None:
         if not model or not model.strip():
-            raise ValueError("Hermes Codex model name must be nonempty")
+            raise ValueError("Hermes CLI model name must be nonempty")
+        if provider not in {"openai-codex", "copilot"}:
+            raise ValueError("Hermes CLI provider must be openai-codex or copilot")
         if min(timeout, max_input_bytes, max_output_chars) < 1:
-            raise ValueError("Hermes Codex limits must be positive")
+            raise ValueError("Hermes CLI limits must be positive")
         if reasoning_effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}:
-            raise ValueError("Hermes Codex reasoning effort must be explicit and supported")
+            raise ValueError("Hermes CLI reasoning effort must be explicit and supported")
         self.model = model
+        self.provider = provider
         self.timeout = timeout
         self.max_input_bytes = max_input_bytes
         self.max_output_chars = max_output_chars
@@ -179,7 +182,7 @@ class HermesOpenAICodexModel:
                 "hermes", "chat",
                 "--safe-mode", "--ignore-rules",
                 "--toolsets", "context_engine",
-                "--provider", "openai-codex", "--model", self.model,
+                "--provider", self.provider, "--model", self.model,
                 "--reasoning", self.reasoning_effort,
                 "--query-file", str(prompt_path),
                 "--oneshot", "--quiet", "--source", "tool",
@@ -253,6 +256,9 @@ def _byte_length(value: str | bytes | None) -> int:
     return len(value.encode("utf-8"))
 
 
+HermesOpenAICodexModel = HermesCLIModel
+
+
 def build_model(policy: ModelPolicy, role: str):
     """Construct the configured provider/model for one pipeline role without storing secrets in policy."""
     model = {"preclassifier": policy.preclassifier, "final": policy.final, "fallback": policy.fallback}.get(role)
@@ -271,8 +277,18 @@ def build_model(policy: ModelPolicy, role: str):
     if policy.provider == "anthropic":
         return AnthropicMessagesModel(model, **kwargs)
     if policy.provider == "hermes-openai-codex":
-        return HermesOpenAICodexModel(
+        return HermesCLIModel(
             model,
+            provider="openai-codex",
+            timeout=policy.timeout_seconds,
+            max_input_bytes=policy.context_limit,
+            max_output_chars=policy.max_output_chars,
+            reasoning_effort=policy.reasoning_effort,
+        )
+    if policy.provider == "github-copilot":
+        return HermesCLIModel(
+            model,
+            provider="copilot",
             timeout=policy.timeout_seconds,
             max_input_bytes=policy.context_limit,
             max_output_chars=policy.max_output_chars,

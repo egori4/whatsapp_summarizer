@@ -22,8 +22,9 @@ The runner now calls `build_model(models, role)` rather than directly constructi
 - `openai` — HTTPS Chat Completions-compatible endpoint; uses strict JSON-schema output.
 - `anthropic` — HTTPS Messages endpoint; injects the same JSON schema into the request and relies on the existing fail-closed grounding validator.
 - `hermes-openai-codex` — calls the local Hermes CLI, which uses its own stored `openai-codex` OAuth credential. Its policy endpoint is exactly `local://hermes-cli`; an API-key setting is forbidden.
+- `github-copilot` — calls the local Hermes CLI with its explicit `copilot` provider route. Its policy endpoint is exactly `local://hermes-cli`; an API-key setting is forbidden.
 
-Cloud credentials are never placed in policy. The direct HTTPS providers use only an environment-variable name ending in `_API_KEY`. The Hermes Codex provider never reads, copies, or serializes an OAuth credential.
+Cloud credentials are never placed in policy. The direct HTTPS providers use only an environment-variable name ending in `_API_KEY`. Hermes CLI providers never read, copy, or serialize their stored credentials.
 
 ## Hermes Codex policy shape
 
@@ -39,17 +40,45 @@ Cloud credentials are never placed in policy. The direct HTTPS providers use onl
 
 The adapter invokes `hermes chat` in one-shot, safe-mode, no-rules mode with only Hermes’ empty `context_engine` toolset. The prompt travels through a temporary `0600` file (never a command-line argument) and is removed after every call. Model output is still passed through the existing schema/grounding validator. If a returned candidate fails that validator, the configured fallback receives exactly one fresh, validator-directed repair attempt with only the concise local failure reason—not the rejected output. Transport/provider failures use the ordinary fallback path without repair feedback when the fallback is genuinely distinct. When final and fallback resolve to the same policy model, they share one adapter and a timeout is terminal rather than launching an identical second call. A second invalid candidate fails closed and produces no digest.
 
-For this provider, set `"reasoning_effort"` explicitly in policy. The adapter passes that value as `hermes chat --reasoning <value>`, so digest reasoning does not inherit the active Hermes profile's default. The verified replay policy uses `"reasoning_effort": "high"` with `gpt-5.6-terra` for both final and fallback roles.
+For either Hermes CLI provider, set `"reasoning_effort"` explicitly in policy. The adapter passes that value as `hermes chat --reasoning <value>`, so digest reasoning does not inherit the active Hermes profile's default. The verified replay policy uses `"reasoning_effort": "high"` with `gpt-5.6-terra` for both final and fallback roles.
 
-### Hermes Codex budget contract
+## GitHub Copilot policy shape
+
+To select GitHub Copilot explicitly, update only the owner-only policy's `models`
+object to the following values; leave its `endpoint` local and do not add an API
+key field:
+
+```json
+{
+  "provider": "github-copilot",
+  "pipeline_mode": "one_pass",
+  "endpoint": "local://hermes-cli",
+  "preclassifier": "gpt-5.6-terra",
+  "final": "gpt-5.6-terra",
+  "fallback": "gpt-5.6-terra",
+  "reasoning_effort": "high"
+}
+```
+
+Use `"pipeline_mode": "two_call"` only for the separately qualified two-call
+candidate. The adapter invokes `hermes chat --provider copilot --model
+gpt-5.6-terra` while retaining `--safe-mode` and `--ignore-rules`; it never
+inherits Hermes' default provider, model, reasoning level, plugins, MCP servers,
+hooks, or rules. Hermes must make that exact model available to the signed-in
+Copilot account; an unavailable model fails closed as a transport failure.
+
+Changing a protected policy, invoking a model, or qualifying the Copilot route
+still requires separate operator approval.
+
+### Hermes CLI budget contract
 
 `hermes chat --help` exposes no output-token/max-output switch. Therefore the adapter never pretends that `max_output_tokens` constrains Hermes. Instead, `models.context_limit` is enforced as a UTF-8 byte limit on the complete prompt (including schema contract) before a `0600` temporary file is created or Hermes runs, and mandatory `models.max_output_chars` is enforced on Hermes stdout before JSON/schema parsing. Either overflow is a visible `ModelFailure`, never silent truncation. `max_output_tokens` remains the real request setting for Ollama and direct HTTPS adapters.
 
 ### One-pass raw-message mode
 
-Set `"pipeline_mode": "one_pass"` only with `hermes-openai-codex` to skip the local preclassifier entirely. The runner normalizes/redacts the current durable message revisions, sends the complete resulting source window to the Hermes final model, and requires a disposition for every source. Hermes is instructed to group related sources internally into discussion threads, retain supporting content inside a relevant thread, and omit only whole irrelevant threads from the reader-facing sections. There is no timestamp-neighbor context expansion and no Ollama call in this mode.
+Set `"pipeline_mode": "one_pass"` only with `hermes-openai-codex` or `github-copilot` to skip the local preclassifier entirely. The runner normalizes/redacts the current durable message revisions, sends the complete resulting source window to the Hermes final model, and requires a disposition for every source. Hermes is instructed to group related sources internally into discussion threads, retain supporting content inside a relevant thread, and omit only whole irrelevant threads from the reader-facing sections. There is no timestamp-neighbor context expansion and no Ollama call in this mode.
 
-The Conditional Phase C candidate uses `"pipeline_mode": "two_call"` with the same Hermes-only connector restriction and also skips the preclassifier. Its extractor sees the complete projected window; only locally validated exact evidence atoms and structural context reach reconciliation. It normally uses two application calls and permits one validation-only repair across the whole pipeline, never a transport retry. This source path remains unqualified and unselected until its independent review and repeated qualification gates pass.
+The Conditional Phase C candidate uses `"pipeline_mode": "two_call"` with the same Hermes-only connector restriction and also skips the preclassifier. Its extractor sees the complete projected window; only locally validated exact evidence atoms and structural context reach reconciliation. It normally uses two application calls and permits one validation-only repair across the whole pipeline, never a transport retry. This source path remains unqualified and unselected until its independent review and repeated qualification gates pass. In both actionable modes, `preclassifier` and `classifier_instruction` remain schema-compatibility fields but are unused.
 
 ## Example cloud-policy shape
 

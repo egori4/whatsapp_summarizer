@@ -160,13 +160,14 @@ class DigestConfig:
         pipeline_mode = model_data.get("pipeline_mode", "two_stage")
         if pipeline_mode not in {"two_stage", "one_pass", "two_call"}:
             raise ConfigError("models.pipeline_mode must be two_stage, one_pass, or two_call")
-        if provider not in {"ollama", "openai", "anthropic", "hermes-openai-codex"}:
-            raise ConfigError("models.provider must be ollama, openai, anthropic, or hermes-openai-codex")
+        hermes_providers = {"hermes-openai-codex", "github-copilot"}
+        if provider not in {"ollama", "openai", "anthropic", *hermes_providers}:
+            raise ConfigError("models.provider must be ollama, openai, anthropic, hermes-openai-codex, or github-copilot")
         api_key_env = model_data.get("api_key_env")
         reasoning_effort = model_data.get("reasoning_effort", "medium")
         if reasoning_effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}:
             raise ConfigError("models.reasoning_effort must be an explicit supported effort, not inherited")
-        if provider in {"ollama", "hermes-openai-codex"}:
+        if provider in {"ollama", *hermes_providers}:
             if api_key_env is not None:
                 raise ConfigError("models.api_key_env must be omitted for local providers")
         elif not isinstance(api_key_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*_API_KEY", api_key_env):
@@ -188,10 +189,10 @@ class DigestConfig:
             raise ConfigError("openai provider requires an HTTPS endpoint")
         if models.provider == "anthropic" and not models.endpoint.startswith("https://"):
             raise ConfigError("anthropic provider requires an HTTPS endpoint")
-        if models.provider == "hermes-openai-codex" and models.endpoint != "local://hermes-cli":
-            raise ConfigError("hermes-openai-codex requires the exact local://hermes-cli connector endpoint")
-        if models.pipeline_mode in {"one_pass", "two_call"} and models.provider != "hermes-openai-codex":
-            raise ConfigError("one_pass and two_call modes are restricted to the Hermes Codex provider")
+        if models.provider in hermes_providers and models.endpoint != "local://hermes-cli":
+            raise ConfigError("Hermes CLI providers require the exact local://hermes-cli connector endpoint")
+        if models.pipeline_mode in {"one_pass", "two_call"} and models.provider not in hermes_providers:
+            raise ConfigError("one_pass and two_call modes are restricted to explicit Hermes CLI providers")
         external_data = _object(data.get("external_fallback"), "external_fallback", {"enabled", "approved", "reduced_bundle_only"})
         external = ExternalFallbackPolicy(external_data.get("enabled") is True, external_data.get("approved") is True, external_data.get("reduced_bundle_only") is True)
         if external.enabled and not (external.approved and external.reduced_bundle_only):
@@ -230,12 +231,13 @@ class DigestConfig:
             raise ConfigError("local live model endpoint must be an explicit loopback endpoint")
         if self.models.provider in {"openai", "anthropic"} and (not self.models.endpoint.startswith("https://") or not self.models.api_key_env):
             raise ConfigError("cloud live model requires HTTPS and an API-key environment variable name")
-        if self.models.provider == "hermes-openai-codex" and (self.models.endpoint != "local://hermes-cli" or self.models.api_key_env is not None):
-            raise ConfigError("Hermes Codex live model requires the exact local connector with no API-key reference")
+        hermes_providers = {"hermes-openai-codex", "github-copilot"}
+        if self.models.provider in hermes_providers and (self.models.endpoint != "local://hermes-cli" or self.models.api_key_env is not None):
+            raise ConfigError("Hermes CLI live models require the exact local connector with no API-key reference")
         if self.models.provider == "ollama" and any(not re.fullmatch(r"sha256:[0-9a-f]{64}", digest or "") for digest in (self.models.preclassifier_digest, self.models.final_digest, self.models.fallback_digest)):
             raise ConfigError("live local-Ollama policy requires verified non-placeholder model digests")
-        if self.models.provider == "hermes-openai-codex" and (self.models.final, self.models.fallback) != ("gpt-5.6-terra", "gpt-5.6-terra"):
-            raise ConfigError("live Hermes Codex policy must use the approved gpt-5.6-terra final and fallback model identifiers")
+        if self.models.provider in hermes_providers and (self.models.final, self.models.fallback) != ("gpt-5.6-terra", "gpt-5.6-terra"):
+            raise ConfigError("live Hermes CLI policy must use the approved gpt-5.6-terra final and fallback model identifiers")
         if self.smtp.host.endswith(".example.invalid") or self.smtp.sender.endswith("@example.invalid"):
             raise ConfigError("live policy cannot use SMTP examples/placeholders")
         if any(not path.startswith("/") or "/../" in path for path in (self.paths["spool"], self.paths["state_dir"])):

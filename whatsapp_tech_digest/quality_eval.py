@@ -509,8 +509,11 @@ def load_evaluation_models(policy_path: Path):
     config = DigestConfig.from_dict(json.loads(policy_path.read_text(encoding="utf-8")))
     if not config.example_only:
         raise ValueError("quality evaluation requires a publication-safe example-only policy")
-    if config.models.pipeline_mode not in {"one_pass", "two_call"} or config.models.provider != "hermes-openai-codex":
-        raise ValueError("quality evaluation requires an actionable Hermes Codex provider")
+    if (
+        config.models.pipeline_mode not in {"one_pass", "two_call"}
+        or config.models.provider not in {"hermes-openai-codex", "github-copilot"}
+    ):
+        raise ValueError("quality evaluation requires an actionable explicit Hermes CLI provider")
     if config.models.endpoint != "local://hermes-cli":
         raise ValueError("quality evaluation requires the local Hermes CLI connector")
     if (

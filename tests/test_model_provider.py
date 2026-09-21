@@ -9,7 +9,13 @@ from unittest.mock import patch
 
 from whatsapp_tech_digest.config import ConfigError, DigestConfig
 from whatsapp_tech_digest.models import ModelFailure
-from whatsapp_tech_digest.model_provider import AnthropicMessagesModel, HermesOpenAICodexModel, OpenAIChatModel, build_model
+from whatsapp_tech_digest.model_provider import (
+    AnthropicMessagesModel,
+    HermesCLIModel,
+    HermesOpenAICodexModel,
+    OpenAIChatModel,
+    build_model,
+)
 
 
 class ModelProviderTests(unittest.TestCase):
@@ -38,11 +44,37 @@ class ModelProviderTests(unittest.TestCase):
         self.assertIsInstance(build_model(config.models, "final"), HermesOpenAICodexModel)
         self.assertIsNone(config.models.api_key_env)
 
+        config = self.policy("github-copilot", "local://hermes-cli", None)
+        self.assertIsInstance(build_model(config.models, "final"), HermesCLIModel)
+        self.assertIsNone(config.models.api_key_env)
+
     def test_hermes_codex_policy_requires_local_connector_without_api_key_reference(self) -> None:
         with self.assertRaises(ConfigError):
             self.policy("hermes-openai-codex", "https://api.openai.com/v1/chat/completions", None)
         with self.assertRaises(ConfigError):
             self.policy("hermes-openai-codex", "local://hermes-cli", "DIGEST_OPENAI_API_KEY")
+        with self.assertRaises(ConfigError):
+            self.policy("github-copilot", "https://api.githubcopilot.com", None)
+        with self.assertRaises(ConfigError):
+            self.policy("github-copilot", "local://hermes-cli", "DIGEST_OPENAI_API_KEY")
+
+    def test_provider_policy_rejects_unsupported_provider(self) -> None:
+        with self.assertRaises(ConfigError):
+            self.policy("inherited-default", "local://hermes-cli", None)
+
+    def test_github_copilot_policy_supports_actionable_pipeline_with_explicit_model(self) -> None:
+        data = json.loads((Path(__file__).parents[1] / "config" / "digest.policy.example.json").read_text())
+        data["models"].update({
+            "provider": "github-copilot", "pipeline_mode": "two_call",
+            "endpoint": "local://hermes-cli", "preclassifier": "gpt-5.6-terra",
+            "final": "gpt-5.6-terra", "fallback": "gpt-5.6-terra",
+            "reasoning_effort": "high",
+        })
+
+        config = DigestConfig.from_dict(data)
+
+        config.require_production_pipeline()
+        self.assertEqual(config.models.provider, "github-copilot")
 
     def test_hermes_codex_policy_pins_reasoning_effort(self) -> None:
         data = json.loads((Path(__file__).parents[1] / "config" / "digest.policy.example.json").read_text())
@@ -83,6 +115,26 @@ class ModelProviderTests(unittest.TestCase):
         config = DigestConfig.from_dict(data)
         config.require_live_safe()
         self.assertEqual(config.models.final, "gpt-5.6-terra")
+
+    def test_live_github_copilot_policy_requires_approved_final_and_fallback_models(self) -> None:
+        data = json.loads((Path(__file__).parents[1] / "config" / "digest.policy.example.json").read_text())
+        data["example_only"] = False
+        data["whatsapp"]["bridge_port"] = 17778
+        data["paths"] = {"spool": "/tmp/wtd-test/spool.sqlite3", "state_dir": "/tmp/wtd-test", "mode": "0700"}
+        data["smtp"].update({"host": "smtp.invalid.test", "sender": "digest@invalid.test"})
+        data["models"].update({
+            "provider": "github-copilot", "pipeline_mode": "one_pass",
+            "preclassifier": "gpt-5.6-terra", "final": "gpt-5.6-terra", "fallback": "gpt-5.6-terra",
+            "endpoint": "local://hermes-cli", "reasoning_effort": "high",
+        })
+        for key in ("preclassifier_digest", "final_digest", "fallback_digest"):
+            data["models"].pop(key)
+
+        for field in ("final", "fallback"):
+            invalid = json.loads(json.dumps(data))
+            invalid["models"][field] = "unapproved-model"
+            with self.subTest(field=field), self.assertRaisesRegex(ConfigError, "approved gpt-5.6-terra"):
+                DigestConfig.from_dict(invalid).require_live_safe()
 
     def test_hermes_codex_adapter_rejects_oversized_prompt_before_runner(self) -> None:
         calls = []
@@ -197,6 +249,28 @@ class ModelProviderTests(unittest.TestCase):
         self.assertNotIn("fixture-secret", " ".join(command))
         self.assertEqual(captured["timeout"], 17)
         self.assertFalse(Path(command[command.index("--query-file") + 1]).exists())
+
+    def test_hermes_copilot_adapter_uses_explicit_safe_provider_and_model(self) -> None:
+        captured = {}
+
+        def runner(command, **kwargs):
+            captured["command"] = command
+            return subprocess.CompletedProcess(command, 0, '{"rows":[]}', "")
+
+        model = HermesCLIModel(
+            "gpt-5.6-terra", provider="copilot", timeout=17,
+            max_input_bytes=4096, max_output_chars=1024, reasoning_effort="high",
+            runner=runner,
+        )
+        self.assertEqual(model.complete("Classify this source"), '{"rows":[]}')
+
+        command = captured["command"]
+        self.assertEqual(command[command.index("--provider") + 1], "copilot")
+        self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-terra")
+        self.assertEqual(command[command.index("--reasoning") + 1], "high")
+        self.assertEqual(command[command.index("--toolsets") + 1], "context_engine")
+        self.assertIn("--safe-mode", command)
+        self.assertIn("--ignore-rules", command)
 
     def test_openai_adapter_requests_json_schema_without_exposing_api_key(self) -> None:
         captured = {}

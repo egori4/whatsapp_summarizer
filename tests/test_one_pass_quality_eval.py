@@ -228,15 +228,33 @@ class OnePassQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(final_model.model, config.models.final)
         self.assertEqual(fallback_model.model, config.models.fallback)
 
-    def test_evaluation_model_loader_rejects_a_different_model_or_reasoning_effort(self) -> None:
-        for field, value in (("final", "different-model"), ("reasoning_effort", "medium")):
-            data = json.loads(POLICY.read_text(encoding="utf-8"))
-            data["models"][field] = value
-            with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "policy.json"
-                path.write_text(json.dumps(data), encoding="utf-8")
-                with self.subTest(field=field), self.assertRaisesRegex(ValueError, "gpt-5.6-terra with high reasoning"):
-                    load_evaluation_models(path)
+    def test_evaluation_models_accept_explicit_github_copilot_policy(self) -> None:
+        data = json.loads(POLICY.read_text(encoding="utf-8"))
+        data["models"].update({
+            "provider": "github-copilot", "endpoint": "local://hermes-cli",
+            "final": "gpt-5.6-terra", "fallback": "gpt-5.6-terra",
+            "reasoning_effort": "high",
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+
+            config, final_model, fallback_model = load_evaluation_models(path)
+
+        self.assertEqual(config.models.provider, "github-copilot")
+        self.assertEqual(final_model.provider, "copilot")
+        self.assertEqual(fallback_model.provider, "copilot")
+
+    def test_evaluation_model_loader_rejects_unapproved_model_or_reasoning_for_each_hermes_provider(self) -> None:
+        for provider in ("hermes-openai-codex", "github-copilot"):
+            for field, value in (("final", "different-model"), ("fallback", "different-model"), ("reasoning_effort", "medium")):
+                data = json.loads(POLICY.read_text(encoding="utf-8"))
+                data["models"].update({"provider": provider, field: value})
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "policy.json"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.subTest(provider=provider, field=field), self.assertRaisesRegex(ValueError, "gpt-5.6-terra with high reasoning"):
+                        load_evaluation_models(path)
 
     def test_evaluation_model_loader_rejects_a_nonexample_policy(self) -> None:
         data = json.loads(POLICY.read_text(encoding="utf-8"))

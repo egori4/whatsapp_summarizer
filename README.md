@@ -159,21 +159,23 @@ normalized messages
 
 This remains the default for policies that omit `models.pipeline_mode`.
 
-#### One-pass Hermes Codex mode
+#### One-pass explicit Hermes CLI mode
 
 ```text
 all eligible normalized current message revisions
   -> Hermes local CLI adapter
-  -> openai-codex / gpt-5.6-terra / explicit high reasoning
+  -> openai-codex or copilot / gpt-5.6-terra / explicit high reasoning
   -> thread-level actionable schema
   -> strict local validation and rendering
 ```
 
-Set `"pipeline_mode": "one_pass"` only with provider `hermes-openai-codex` and endpoint `local://hermes-cli`. This remains the compact actionable baseline, although its failed Phase 4 gate makes it ineligible for selection. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition.
+Set `"pipeline_mode": "one_pass"` only with an explicit Hermes CLI provider (`hermes-openai-codex` or `github-copilot`) and endpoint `local://hermes-cli`. Model, provider, and reasoning are policy-pinned; they do not inherit Hermes defaults. This remains the compact actionable baseline, although its failed Phase 4 gate makes it ineligible for selection. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition. See `MODEL_PROVIDER_SWITCHING.md` for the owner-only GitHub Copilot policy shape and approval boundary.
 
 #### Ephemeral two-call Hermes Codex candidate
 
 Set `"pipeline_mode": "two_call"` only with the same Hermes connector and policy-pinned model/reasoning settings. Call A sees the complete allowlisted projected window and returns one disposition per source plus exact evidence atoms. Local validation blocks unsupported atoms before Call B. Call B sees only validated atoms and structural context, returns no factual prose, and the local renderer inserts exact atoms into its plan. The path stores no semantic cache or ledger, bypasses the legacy preclassifier, normally uses two application calls, and permits at most one closed-code validation repair for a maximum of three. Transport or empty-output failure is terminal. Phase C source review is accepted. The first two-call Phase 4 repeat exposed the installed Hermes v0.21.3 high-effort small-prompt watchdog defect; the upstream effort-aware correction (`a6cad512a5`, `ebd106f3ec`) is pinned on the local Hermes branch at `1e1c0a9c9e` and covered by a no-network regression. An approved post-repair repeat confirmed that all three permitted provider calls can now complete, but both reconciliation candidates failed the same local `DISPOSITION` invariant after extraction validated 24 atoms. No rendered artifact was accepted. The prompt's previously one-way accounting rule now explicitly matches the validator's bidirectional contract and has a regression test, but the candidate remains unqualified and unselected as `NOT ELIGIBLE — VALIDATION FAILURE`; another model run requires separate approval.
+
+In both actionable modes, `preclassifier` and `classifier_instruction` remain schema-compatibility fields but are unused.
 
 Phase C review remediation binds reviewed-artifact candidate counts to the complete normalized window, applies topic/unanswered ownership to whole source revisions rather than individual atoms, permits self-resolution only for an edited tracked `UPDATE`, and keeps policy-sourced final instructions out of Call B and its repair. Independent re-review returned `APPROVE`, and the operator recorded acceptance before the provider-backed repeats.
 
@@ -201,7 +203,7 @@ A later `--execution-mode delivery-capable --review-manifest <owner-only.json> -
 
 An operator-only historical recovery render additionally supplies `--bounded-cutoff <durable-change-sequence>`. This option is valid only with `render-only`, `--review-manifest`, and `--review-artifact`. It selects the whole pending prefix through that cutoff, bypasses the normal age horizon without omitting rows, labels the artifact as historical, and leaves every later durable change pending. The scheduler and unattended wrapper cannot select this mode.
 
-### Hermes Codex size budgets
+### Hermes CLI size budgets
 
 The local Hermes CLI exposes no model-output cap flag (verified with `hermes chat --help`), so its limits are enforced in the adapter rather than implied by a nonexistent CLI option:
 
@@ -217,7 +219,7 @@ The complete field-use matrix and schema-v1 compatibility decision are in [`POLI
 - `contacts.fallback` is validated, but attribution always prefers `display_name` and falls back to `participant` regardless of the setting.
 - `redaction.enabled` must be `true` and cannot be turned off; it selects no alternative behavior.
 - `runtime.lock_seconds`, `runtime.max_runtime_seconds`, and `health.heartbeat_seconds` are validated as positive integers only. Run exclusivity comes from the `--lock` flock and there is no in-process runtime cap.
-- `models.context_limit` bounds the prompt only for `hermes-openai-codex`. The Ollama and direct HTTPS adapters apply no prompt-size ceiling.
+- `models.context_limit` bounds the prompt only for explicit Hermes CLI providers (`hermes-openai-codex` and `github-copilot`). The Ollama and direct HTTPS adapters apply no prompt-size ceiling.
 
 ## Reader-facing summarization goal
 
