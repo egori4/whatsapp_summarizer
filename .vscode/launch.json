@@ -35,6 +35,28 @@
       "args": ["--config", "${workspaceFolder}/config.yaml", "whatsapp", "groups"]
     },
     {
+      "name": "Digest: Collector once",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "collector", "once"]
+    },
+    {
+      "name": "Digest: Collector run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "collector", "run"]
+    },
+    {
       "name": "Digest: Run workflow",
       "type": "debugpy",
       "request": "launch",
