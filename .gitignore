@@ -22,3 +22,11 @@ config/whatsapp-group-directory.json
 data*/
 run.lock
 HANDOFF.private.md
+
+# WhatsApp Technical Digest v2 local configuration/state.
+config.yaml
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
