@@ -11,7 +11,7 @@ hermes:
   timeout_seconds: 600
 
 whatsapp:
-  bridge_url: http://127.0.0.1:3000
+  bridge_url: http://127.0.0.1:3001
   poll_interval_seconds: 1
 
 email:
