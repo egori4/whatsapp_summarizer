@@ -1,0 +1,88 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Digest: Validate config",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "config", "validate"]
+    },
+    {
+      "name": "Digest: Status",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "status"]
+    },
+    {
+      "name": "Digest: Discover WhatsApp groups",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "whatsapp", "groups"]
+    },
+    {
+      "name": "Digest: Run workflow",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "run", "${input:workflowId}"]
+    },
+    {
+      "name": "Digest: First/manual run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "run", "${input:workflowId}", "--last", "${input:lastWindow}"]
+    },
+    {
+      "name": "Digest: Dry run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "run", "${input:workflowId}", "--last", "${input:lastWindow}", "--dry-run"]
+    },
+    {
+      "name": "Digest: Replay range",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "whatsapp_digest.cli",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--config", "${workspaceFolder}/config.yaml", "replay", "${input:workflowId}", "--from", "${input:replayFrom}", "--to", "${input:replayTo}"]
+    }
+  ],
+  "inputs": [
+    {"id": "workflowId", "type": "promptString", "description": "Workflow ID", "default": "global-ps"},
+    {"id": "lastWindow", "type": "promptString", "description": "Initial/manual run window", "default": "24h"},
+    {"id": "replayFrom", "type": "promptString", "description": "Replay start"},
+    {"id": "replayTo", "type": "promptString", "description": "Replay end"}
+  ]
+}
