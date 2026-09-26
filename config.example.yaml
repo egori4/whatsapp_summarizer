@@ -1,0 +1,58 @@
+paths:
+  database: ./data/messages.db
+  log: ./logs/digest.log
+
+retention:
+  processed_raw_days: 7
+  log_days: 30
+
+hermes:
+  command: hermes
+  timeout_seconds: 600
+
+email:
+  host: smtp.example.com
+  port: 587
+  sender: digest@example.com
+  username: digest@example.com
+  password_env: WHATSAPP_DIGEST_SMTP_PASSWORD
+  starttls: true
+  timeout_seconds: 30
+
+defaults:
+  timezone: America/Toronto
+
+workflows:
+  - id: global-ps
+    name: Global PS Technical Digest
+    group_jid: "1234567890-1234567890@g.us"
+    schedule:
+      type: daily
+      at: "08:00"
+    model:
+      provider: inherit
+      name: inherit
+      reasoning: inherit
+    summarization:
+      instructions: |
+        Focus on technical problems, troubleshooting, root cause, fixes,
+        versions, workarounds, useful commands and links, important
+        administrative announcements, explicit actions, and unanswered
+        technical questions.
+      sections:
+        - id: technical_updates
+          title: Technical Updates
+          guidance: Technical issues, troubleshooting, fixes, versions and guidance.
+        - id: actions
+          title: Actions / Follow-up
+          guidance: Explicit actions, owners and next steps.
+        - id: unanswered
+          title: Unanswered Technical Questions
+          guidance: Important questions that remain unresolved in this source window.
+    delivery:
+      email:
+        to:
+          - user@example.com
+        cc: []
+        attach_raw_messages: true
+        subject: "[TechTeam Daily] {date} — {workflow_name}"
