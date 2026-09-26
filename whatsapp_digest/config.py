@@ -48,6 +48,7 @@ class AppConfig:
     processed_raw_days: int
     log_days: int
     hermes: dict[str, Any]
+    whatsapp: dict[str, Any]
     email: dict[str, Any]
     default_timezone: str
     workflows: tuple[WorkflowConfig, ...] = field(default_factory=tuple)
@@ -156,6 +157,18 @@ def load_config(path: str | Path) -> AppConfig:
         raise ConfigError("hermes.timeout_seconds must be a positive integer")
     hermes = {"command": command, "timeout_seconds": timeout}
 
+    whatsapp = _mapping(root.get("whatsapp", {}), "whatsapp")
+    bridge_url = _nonempty(whatsapp.get("bridge_url", "http://127.0.0.1:3000"), "whatsapp.bridge_url").rstrip("/")
+    if not re.fullmatch(r"http://127\.0\.0\.1:[0-9]{1,5}", bridge_url):
+        raise ConfigError("whatsapp.bridge_url must be an explicit loopback URL such as http://127.0.0.1:3000")
+    bridge_port = int(bridge_url.rsplit(":", 1)[1])
+    if not 1 <= bridge_port <= 65535:
+        raise ConfigError("whatsapp.bridge_url port must be between 1 and 65535")
+    poll_interval = whatsapp.get("poll_interval_seconds", 1.0)
+    if not isinstance(poll_interval, (int, float)) or isinstance(poll_interval, bool) or not 0.1 <= float(poll_interval) <= 60:
+        raise ConfigError("whatsapp.poll_interval_seconds must be between 0.1 and 60")
+    whatsapp = {"bridge_url": bridge_url, "poll_interval_seconds": float(poll_interval)}
+
     email = _mapping(root.get("email"), "email")
     for key in ("host", "sender", "password_env"):
         _nonempty(email.get(key), f"email.{key}")
@@ -237,4 +250,4 @@ def load_config(path: str | Path) -> AppConfig:
             email={"to": to, "cc": cc, "attach_raw_messages": attach_raw, "subject": subject},
         ))
 
-    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, email, default_timezone, tuple(workflows))
+    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, tuple(workflows))
