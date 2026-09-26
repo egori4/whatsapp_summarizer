@@ -7,6 +7,7 @@ import sys
 
 from .config import ConfigError, load_config
 from .database import DigestDatabase
+from .collector import WhatsAppCollector
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -23,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
     whatsapp = sub.add_parser("whatsapp")
     whatsapp_sub = whatsapp.add_subparsers(dest="whatsapp_command", required=True)
     whatsapp_sub.add_parser("groups")
+
+    collector = sub.add_parser("collector")
+    collector_sub = collector.add_subparsers(dest="collector_command", required=True)
+    collector_sub.add_parser("once")
+    collector_sub.add_parser("run")
 
     return parser
 
@@ -83,6 +89,22 @@ def _cmd_groups(path: str) -> int:
     return 0
 
 
+def _cmd_collector(path: str, *, once: bool) -> int:
+    cfg = load_config(path)
+    with DigestDatabase(cfg.database_path) as db:
+        collector = WhatsAppCollector(cfg, db)
+        if once:
+            stats = collector.collect_once()
+            print(
+                f"received={stats.received} stored={stats.stored} "
+                f"updated={stats.updated} discovered_groups={stats.discovered_groups} "
+                f"ignored_direct={stats.ignored_direct}"
+            )
+            return 0
+        collector.run_forever()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -92,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_status(args.config)
         if args.command == "whatsapp" and args.whatsapp_command == "groups":
             return _cmd_groups(args.config)
+        if args.command == "collector":
+            return _cmd_collector(args.config, once=args.collector_command == "once")
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
