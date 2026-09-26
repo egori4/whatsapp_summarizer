@@ -9,9 +9,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-_GROUP_JID_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?@g\\.us$")
-_EMAIL_RE = re.compile(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
-_TIME_RE = re.compile(r"^(?:[01]\\d|2[0-3]):[0-5]\\d$")
+_GROUP_JID_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?@g\.us$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 _REASONING = {"inherit", "none", "minimal", "low", "medium", "high", "xhigh"}
 
