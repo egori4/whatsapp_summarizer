@@ -7,6 +7,10 @@ name = "whatsapp-tech-digest"
 version = "1.2.0"
 description = "Offline, fail-closed WhatsApp TechTeam digest reference implementation"
 requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+digest = "whatsapp_digest.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
