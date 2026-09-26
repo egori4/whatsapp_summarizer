@@ -17,8 +17,8 @@ The production path is intentionally small:
 
 ```text
 WhatsApp
-  -> upstream Hermes
-  -> collector-only plugin
+  -> unmodified upstream Hermes WhatsApp bridge (standalone transport)
+  -> v2 Python collector (only /messages consumer)
   -> SQLite message buffer
   -> workflow runner
   -> one Hermes LLM call
@@ -45,7 +45,7 @@ v2 MUST NOT modify or require local changes to:
 
 There is no private Hermes fork.
 
-The application may use only supported Hermes configuration, CLI/provider routing, and plugin hooks.
+The application may use only supported upstream components and interfaces. The WhatsApp bridge is run unmodified as a standalone transport; the Hermes WhatsApp gateway adapter is disabled so WhatsApp can never become a conversational Hermes channel. Hermes remains the model gateway for summarization.
 
 If a future Hermes change breaks a supported integration point, adapt the plugin/application boundary. Do not patch Hermes internals.
 
@@ -53,7 +53,7 @@ If a future Hermes change breaks a supported integration point, adapt the plugin
 
 WhatsApp is not a command or chat interface for Hermes in this deployment.
 
-Every inbound WhatsApp event handled by the v2 collector is consumed before normal agent dispatch.
+WhatsApp inbound is consumed directly by the v2 collector from the standalone bridge and is never routed through Hermes agent dispatch at all.
 
 Behavior:
 
@@ -367,10 +367,20 @@ must remain inert source text. It may be ignored as non-material content but can
 
 ## 8. WhatsApp security boundary
 
+### Transport isolation
+
+Run the unmodified upstream Hermes `scripts/whatsapp-bridge/bridge.js` as a standalone loopback service. Do **not** enable the Hermes WhatsApp gateway platform for this deployment.
+
+The v2 collector is the only consumer of `GET /messages`. It never calls the bridge's outbound POST routes.
+
+This is stronger and simpler than an interception plugin: WhatsApp source content never enters Hermes sessions, commands, tools, or agent dispatch.
+
 Retain the useful v1 controls without porting its state/provenance complexity:
 
 - exact `@g.us` JID matching for configured workflows;
-- all WhatsApp inbound consumed before agent dispatch;
+- Hermes WhatsApp gateway adapter disabled;
+- standalone bridge bound to loopback only;
+- v2 collector is the sole `/messages` consumer;
 - DMs/non-group messages ignored;
 - unconfigured groups store only discovery metadata, never message content;
 - configured groups store source content but never trigger conversational Hermes;
@@ -391,7 +401,7 @@ Upstream Hermes itself may expose outbound WhatsApp bridge endpoints such as sen
 
 The v2 guarantee is:
 
-> No digest code path can invoke outbound WhatsApp operations, and no WhatsApp inbound event is dispatched into normal Hermes reasoning/tools.
+> No digest code path invokes outbound WhatsApp operations, and WhatsApp inbound never enters normal Hermes reasoning/tools because the Hermes WhatsApp gateway adapter is disabled.
 
 If a future requirement demands that the Hermes process be technically incapable of any WhatsApp output, solve that with process/network isolation or a dedicated read-only collector, not a Hermes source patch.
 
@@ -514,22 +524,17 @@ The run table is operational metadata, not a full digest archive.
 
 ---
 
-## 12. Deduplication, edits, and deletes
+## 12. Deduplication and source changes
 
 WhatsApp message ID is the message identity.
 
 - new message -> INSERT;
 - same ID/same content -> no-op;
-- same ID/changed content -> UPDATE + new `change_seq`;
-- deletion/revocation -> `deleted=1` + new `change_seq`.
+- same ID/changed content -> UPDATE + new `change_seq` if upstream surfaces a changed event.
 
-There is no permanent message-version history.
+The current upstream standalone bridge does not expose a dedicated edit/revoke event stream. Phase 1 therefore does **not** promise complete WhatsApp edit/delete tracking and will not patch the bridge to add it.
 
-If a previously summarized message is edited later, the new `change_seq` makes the change eligible for a future digest.
-
-If a message is deleted before it is summarized, exclude it.
-
-Phase 1 does not create correction emails solely because an already-summarized message was deleted.
+The database keeps update/delete-capable fields so later upstream support can be consumed without redesign, but production behavior is limited to events actually supplied by the upstream bridge.
 
 ---
 
@@ -1082,30 +1087,30 @@ DoD:
 - relative paths are independent of process CWD;
 - no network/model/email action occurs in Phase 1 tests.
 
-### Phase 2 — upstream Hermes collector
+### Phase 2 — upstream bridge collector
 
 Deliver:
 
-- small native plugin;
+- use the unmodified upstream Hermes WhatsApp bridge as a standalone loopback transport;
+- keep the Hermes WhatsApp gateway adapter disabled;
+- Python collector polls `GET /messages`;
 - load configured group JIDs;
-- all WhatsApp inbound returns SKIP;
 - DMs ignored;
 - unknown groups discovery-only;
-- configured groups persisted;
-- edit/delete handling based on supported events;
-- fail-closed storage behavior;
+- configured group text/captions persisted;
+- duplicate/repeated IDs handled safely;
 - collector security tests.
 
 DoD:
 
-- real upstream Hermes installation requires no source patch;
+- upstream Hermes source requires no patch;
 - configured group content is collected;
 - captions collected when surfaced;
-- DM never reaches agent;
-- unknown group content never stored;
-- configured group never reaches agent;
-- failure still consumes event;
-- no outbound WhatsApp call exists in plugin/application.
+- DM content is discarded;
+- unknown group content is never stored;
+- WhatsApp content never enters Hermes agent dispatch;
+- collector never calls bridge POST/send/edit/media/typing routes;
+- bridge and collector communicate only over loopback.
 
 ### Phase 3 — Hermes model pipeline
 
