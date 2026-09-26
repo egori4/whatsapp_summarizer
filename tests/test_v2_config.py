@@ -106,7 +106,7 @@ def test_duplicate_workflow_id_rejected(tmp_path):
         to: [other@example.com]
 """
     with pytest.raises(ConfigError, match="duplicate workflow id"):
-        load_config(write_config(tmp_path, BASE + textwrap.dedent(extra)))
+        load_config(write_config(tmp_path, BASE + extra))
 
 
 def test_duplicate_group_jid_rejected(tmp_path):
@@ -121,7 +121,7 @@ def test_duplicate_group_jid_rejected(tmp_path):
         to: [other@example.com]
 """
     with pytest.raises(ConfigError, match="duplicate group JID"):
-        load_config(write_config(tmp_path, BASE + textwrap.dedent(extra)))
+        load_config(write_config(tmp_path, BASE + extra))
 
 
 @pytest.mark.parametrize("jid", ["alice", "12345@s.whatsapp.net", "*@g.us", ""])
