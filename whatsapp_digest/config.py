@@ -158,9 +158,9 @@ def load_config(path: str | Path) -> AppConfig:
     hermes = {"command": command, "timeout_seconds": timeout}
 
     whatsapp = _mapping(root.get("whatsapp", {}), "whatsapp")
-    bridge_url = _nonempty(whatsapp.get("bridge_url", "http://127.0.0.1:3000"), "whatsapp.bridge_url").rstrip("/")
+    bridge_url = _nonempty(whatsapp.get("bridge_url", "http://127.0.0.1:3001"), "whatsapp.bridge_url").rstrip("/")
     if not re.fullmatch(r"http://127\.0\.0\.1:[0-9]{1,5}", bridge_url):
-        raise ConfigError("whatsapp.bridge_url must be an explicit loopback URL such as http://127.0.0.1:3000")
+        raise ConfigError("whatsapp.bridge_url must be an explicit loopback URL such as http://127.0.0.1:3001")
     bridge_port = int(bridge_url.rsplit(":", 1)[1])
     if not 1 <= bridge_port <= 65535:
         raise ConfigError("whatsapp.bridge_url port must be between 1 and 65535")
