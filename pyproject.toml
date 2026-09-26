@@ -12,6 +12,9 @@ dependencies = ["PyYAML>=6.0"]
 [project.scripts]
 digest = "whatsapp_digest.cli:main"
 
+[tool.setuptools]
+packages = ["whatsapp_digest"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
