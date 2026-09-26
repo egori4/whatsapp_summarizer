@@ -17,7 +17,7 @@ hermes:
   command: hermes
   timeout_seconds: 600
 whatsapp:
-  bridge_url: http://127.0.0.1:3000
+  bridge_url: http://127.0.0.1:3001
   poll_interval_seconds: 1
 email:
   host: smtp.example.com
@@ -93,7 +93,7 @@ def test_configured_group_is_stored_and_only_get_feed_is_read(tmp_path):
 
     assert stats.stored == 1
     assert rows[0]["text"] == "Upgrade to 34.1.1."
-    assert opener.calls == [("http://127.0.0.1:3000/messages", 10)]
+    assert opener.calls == [("http://127.0.0.1:3001/messages", 10)]
 
 
 def test_direct_message_is_discarded_completely(tmp_path):
