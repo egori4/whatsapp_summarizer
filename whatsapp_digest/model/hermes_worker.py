@@ -16,6 +16,11 @@ _HERMES_ROOT = os.environ.get("HERMES_AGENT_ROOT", "").strip()
 if _HERMES_ROOT and _HERMES_ROOT not in sys.path:
     sys.path.insert(0, _HERMES_ROOT)
 
+# Hermes source installs may re-exec from a legacy venv into the PM-managed
+# interpreter. Bootstrap before importing any Hermes/third-party dependency so
+# the committed dependency environment is activated in the relaunched process.
+import hermes_bootstrap  # noqa: F401,E402
+
 
 class WorkerError(RuntimeError):
     pass
