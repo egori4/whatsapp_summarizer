@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - v2-workflow-rebuild
+    paths:
+      - "whatsapp_digest/**"
+      - "tests/test_v2_*.py"
+      - "config.example.yaml"
+      - "pyproject.toml"
+      - ".github/workflows/v2-tests.yml"
   pull_request:
     paths:
       - "whatsapp_digest/**"
@@ -11,6 +17,10 @@ on:
       - "config.example.yaml"
       - "pyproject.toml"
       - ".github/workflows/v2-tests.yml"
+
+concurrency:
+  group: v2-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-v2:
