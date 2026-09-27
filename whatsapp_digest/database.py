@@ -279,6 +279,55 @@ class DigestDatabase:
             message_ids,
         ))
 
+    def sources_are_fresh(self, snapshot_rows: list[sqlite3.Row]) -> bool:
+        for snapshot in snapshot_rows:
+            current = self._conn.execute(
+                "SELECT change_seq, deleted FROM messages WHERE message_id=?",
+                (snapshot["message_id"],),
+            ).fetchone()
+            if current is None:
+                return False
+            if int(current["change_seq"]) != int(snapshot["change_seq"]):
+                return False
+            if int(current["deleted"]) != int(snapshot["deleted"]):
+                return False
+        return True
+
+    def complete_success_and_checkpoint(
+        self,
+        run_id: str,
+        workflow_id: str,
+        checkpoint_seq: int,
+        *,
+        status: str,
+        provider: str | None = None,
+        model: str | None = None,
+        reasoning: str | None = None,
+    ) -> None:
+        stamp = _utc_now()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO workflow_state(workflow_id) VALUES (?)",
+                (workflow_id,),
+            )
+            conn.execute(
+                """
+                UPDATE workflow_state SET
+                    checkpoint_seq=?, initialized=1, last_success_at=?,
+                    last_run_id=?, last_run_status=?
+                WHERE workflow_id=?
+                """,
+                (checkpoint_seq, stamp, run_id, status, workflow_id),
+            )
+            conn.execute(
+                """
+                UPDATE runs SET completed_at=?, status=?, provider=?, model=?, reasoning=?,
+                    failure_stage=NULL, failure_reason=NULL
+                WHERE run_id=?
+                """,
+                (stamp, status, provider, model, reasoning, run_id),
+            )
+
     def create_run(self, *, run_id: str, workflow_id: str, mode: str, checkpoint_before: int | None, cutoff_seq: int | None, message_count: int = 0) -> None:
         self._conn.execute(
             """

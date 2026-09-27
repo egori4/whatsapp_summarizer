@@ -1168,18 +1168,27 @@ DoD:
 
 Deliver:
 
-- email delivery module;
-- multiple recipients;
-- raw attachment toggle;
-- failure notifications where SMTP remains usable;
-- checkpoint update only on known success.
+- SMTP email delivery module behind the narrow delivery interface;
+- plain-text + HTML multipart digest;
+- multiple To/Cc recipients from validated configuration only;
+- configurable raw attachment toggle using the exact model-visible source export;
+- best-effort failure notifications for model/validation/render/freshness failures when SMTP remains usable;
+- pre-send source freshness validation;
+- checkpoint/run-state update committed atomically after known success;
+- empty/no-usable/no-material successful windows advance without sending a normal digest.
 
 DoD:
 
-- SMTP success advances exactly to run cutoff;
-- all earlier failure stages retain checkpoint;
-- SMTP failure retains checkpoint;
-- no recipient may originate from source messages/model output.
+- SMTP success advances exactly to the captured run cutoff;
+- model, validation, render, freshness, and SMTP failures retain the previous checkpoint;
+- a source edit after the run snapshot prevents delivery;
+- valid no-material output advances the checkpoint without a normal email;
+- failure notifications never contain raw WhatsApp source content;
+- no recipient may originate from source messages/model output;
+- raw attachment is included only when the workflow enables it;
+- dry-run still sends no email and never advances checkpoint.
+
+Delivery is intentionally at-least-once: if SMTP accepts an email and the process dies before the local success transaction commits, a later retry may duplicate that digest. Phase 1 accepts this rare edge case rather than rebuilding v1 delivery reconciliation.
 
 ### Phase 6 — scheduling
 

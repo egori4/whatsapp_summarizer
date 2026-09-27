@@ -144,7 +144,7 @@ def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, d
         since=since,
         dry_run=dry_run,
     )
-    if result.rendered_text:
+    if dry_run and result.rendered_text:
         print(result.rendered_text.rstrip())
         artifact_dir = _save_dry_run_artifacts(cfg.database_path, result)
         if artifact_dir:
@@ -159,6 +159,12 @@ def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, d
     print(f"Workflow: {result.workflow_id}")
     print(f"Status: {result.status}")
     print(f"Messages: {result.message_count}")
+    if result.provider:
+        print(f"Provider: {result.provider}")
+    if result.model:
+        print(f"Model: {result.model}")
+    if result.reasoning:
+        print(f"Reasoning: {result.reasoning}")
     return 0
 
 

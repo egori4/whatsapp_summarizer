@@ -4,12 +4,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
+from string import Formatter
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from .config import AppConfig, WorkflowConfig
 from .database import DigestDatabase
+from .delivery.base import DeliveryChannel, DeliveryError
+from .delivery.email import EmailDelivery
 from .model.hermes import HermesModelGateway, HermesGatewayError, ModelInvocationResult, source_record
 from .raw_export import render_raw_messages
 from .renderer import RenderContext, render_digest
@@ -78,6 +81,39 @@ def _new_run_id(workflow_id: str, now: datetime) -> str:
     return f"{now.strftime('%Y%m%dT%H%M%SZ')}-{workflow_id}-{uuid4().hex[:8]}"
 
 
+def _format_subject(workflow: WorkflowConfig, local_now: datetime, run_id: str) -> str:
+    try:
+        return workflow.email["subject"].format(
+            date=local_now.strftime("%Y-%m-%d"),
+            workflow_name=workflow.name,
+            workflow_id=workflow.id,
+            run_id=run_id,
+        )
+    except (KeyError, ValueError) as exc:
+        raise RunnerError(f"invalid email subject template: {exc}") from exc
+
+
+def _notify_failure(
+    channel: DeliveryChannel,
+    workflow: WorkflowConfig,
+    *,
+    run_id: str,
+    stage: str,
+    reason: str,
+    local_now: datetime,
+) -> None:
+    try:
+        channel.send_failure(
+            workflow,
+            run_id=run_id,
+            stage=stage,
+            reason=reason[:1000],
+            date=local_now.strftime("%Y-%m-%d"),
+        )
+    except DeliveryError:
+        pass
+
+
 def run_workflow(
     config: AppConfig,
     workflow_id: str,
@@ -87,15 +123,17 @@ def run_workflow(
     dry_run: bool = False,
     now: datetime | None = None,
     gateway: HermesModelGateway | None = None,
+    delivery: DeliveryChannel | None = None,
 ) -> RunResult:
-    if not dry_run:
-        raise RunnerError("delivery-capable runs are not enabled until Phase 5; use --dry-run")
     if last and since:
         raise RunnerError("use only one of --last or --since")
 
     workflow = config.workflow(workflow_id)
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    local_now = current.astimezone(ZoneInfo(workflow.timezone))
     run_id = _new_run_id(workflow.id, current)
+    mode = "dry-run" if dry_run else "run"
+    channel = delivery or EmailDelivery(config)
 
     with DigestDatabase(config.database_path) as db:
         state = db.workflow_state(workflow.id)
@@ -128,23 +166,43 @@ def run_workflow(
         db.create_run(
             run_id=run_id,
             workflow_id=workflow.id,
-            mode="dry-run",
+            mode=mode,
             checkpoint_before=checkpoint if initialized else None,
             cutoff_seq=cutoff,
             message_count=len(usable),
         )
 
         if not rows:
-            db.finish_run(run_id, status="dry-run-empty")
+            if dry_run:
+                db.finish_run(run_id, status="dry-run-empty")
+                status = "no-pending-messages"
+            else:
+                db.complete_success_and_checkpoint(
+                    run_id,
+                    workflow.id,
+                    cutoff,
+                    status="success-no-pending",
+                )
+                status = "success-no-pending"
             return RunResult(
-                run_id, workflow.id, "no-pending-messages", 0, cutoff,
+                run_id, workflow.id, status, 0, cutoff,
                 None, None, digest={"sections": []},
             )
 
         if not usable:
-            db.finish_run(run_id, status="dry-run-empty")
+            if dry_run:
+                db.finish_run(run_id, status="dry-run-empty")
+                status = "no-usable-messages"
+            else:
+                db.complete_success_and_checkpoint(
+                    run_id,
+                    workflow.id,
+                    cutoff,
+                    status="success-no-usable",
+                )
+                status = "success-no-usable"
             return RunResult(
-                run_id, workflow.id, "no-usable-messages", 0, cutoff,
+                run_id, workflow.id, status, 0, cutoff,
                 None, None, digest={"sections": []},
             )
 
@@ -152,17 +210,24 @@ def run_workflow(
         try:
             model_result: ModelInvocationResult = model_gateway.summarize(workflow, usable)
         except HermesGatewayError as exc:
+            reason = str(exc)
             db.finish_run(
                 run_id,
                 status="failed",
                 failure_stage="model",
-                failure_reason=str(exc)[:1000],
+                failure_reason=reason[:1000],
             )
+            if not dry_run:
+                _notify_failure(
+                    channel, workflow, run_id=run_id, stage="model",
+                    reason=reason, local_now=local_now,
+                )
             raise RunnerError(f"model generation failed: {exc}") from exc
 
         try:
             digest = validate_digest(model_result.raw_output, workflow, usable)
         except DigestValidationError as exc:
+            reason = str(exc)
             db.finish_run(
                 run_id,
                 status="failed",
@@ -170,15 +235,20 @@ def run_workflow(
                 model=model_result.model,
                 reasoning=model_result.reasoning,
                 failure_stage="validation",
-                failure_reason=str(exc)[:1000],
+                failure_reason=reason[:1000],
             )
+            if not dry_run:
+                _notify_failure(
+                    channel, workflow, run_id=run_id, stage="validation",
+                    reason=reason, local_now=local_now,
+                )
             raise RunnerError(f"model output validation failed: {exc}") from exc
 
         render_context = RenderContext(
             workflow_name=workflow.name,
             workflow_id=workflow.id,
             run_id=run_id,
-            generated_at=current.astimezone(ZoneInfo(workflow.timezone)),
+            generated_at=local_now,
             timezone=workflow.timezone,
             provider=model_result.provider,
             model=model_result.model,
@@ -187,22 +257,132 @@ def run_workflow(
             window_start=window_start,
             window_end=window_end,
         )
-        rendered = render_digest(digest, render_context)
-        model_records = model_result.source_records or tuple(source_record(row) for row in usable)
-        raw_text = render_raw_messages(model_records, render_context)
+        try:
+            rendered = render_digest(digest, render_context)
+            model_records = model_result.source_records or tuple(source_record(row) for row in usable)
+            raw_text = render_raw_messages(model_records, render_context)
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+            db.finish_run(
+                run_id,
+                status="failed",
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+                failure_stage="render",
+                failure_reason=reason[:1000],
+            )
+            if not dry_run:
+                _notify_failure(
+                    channel, workflow, run_id=run_id, stage="render",
+                    reason=reason, local_now=local_now,
+                )
+            raise RunnerError(f"rendering failed: {exc}") from exc
 
-        db.finish_run(
+        if dry_run:
+            db.finish_run(
+                run_id,
+                status="dry-run-success",
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+            )
+            return RunResult(
+                run_id=run_id,
+                workflow_id=workflow.id,
+                status="dry-run-success" if digest["sections"] else "dry-run-no-material-updates",
+                message_count=len(usable),
+                cutoff_seq=cutoff,
+                window_start=window_start,
+                window_end=window_end,
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+                digest=digest,
+                rendered_text=rendered.text,
+                rendered_html=rendered.html,
+                raw_text=raw_text,
+            )
+
+        if not db.sources_are_fresh(usable):
+            reason = "one or more selected source messages changed after the run snapshot"
+            db.finish_run(
+                run_id,
+                status="failed",
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+                failure_stage="freshness",
+                failure_reason=reason,
+            )
+            _notify_failure(
+                channel, workflow, run_id=run_id, stage="freshness",
+                reason=reason, local_now=local_now,
+            )
+            raise RunnerError("source messages changed during the run; checkpoint was not advanced")
+
+        if not digest["sections"]:
+            db.complete_success_and_checkpoint(
+                run_id,
+                workflow.id,
+                cutoff,
+                status="success-no-material",
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+            )
+            return RunResult(
+                run_id=run_id,
+                workflow_id=workflow.id,
+                status="success-no-material",
+                message_count=len(usable),
+                cutoff_seq=cutoff,
+                window_start=window_start,
+                window_end=window_end,
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+                digest=digest,
+                rendered_text=rendered.text,
+                rendered_html=rendered.html,
+                raw_text=raw_text,
+            )
+
+        subject = _format_subject(workflow, local_now, run_id)
+        try:
+            channel.send_digest(
+                workflow,
+                subject=subject,
+                text=rendered.text,
+                html=rendered.html,
+                raw_text=raw_text,
+                run_id=run_id,
+            )
+        except DeliveryError as exc:
+            db.finish_run(
+                run_id,
+                status="failed",
+                provider=model_result.provider,
+                model=model_result.model,
+                reasoning=model_result.reasoning,
+                failure_stage="delivery",
+                failure_reason=str(exc)[:1000],
+            )
+            raise RunnerError(f"email delivery failed: {exc}") from exc
+
+        db.complete_success_and_checkpoint(
             run_id,
-            status="dry-run-success",
+            workflow.id,
+            cutoff,
+            status="delivered",
             provider=model_result.provider,
             model=model_result.model,
             reasoning=model_result.reasoning,
         )
-
         return RunResult(
             run_id=run_id,
             workflow_id=workflow.id,
-            status="dry-run-success" if digest["sections"] else "dry-run-no-material-updates",
+            status="delivered",
             message_count=len(usable),
             cutoff_seq=cutoff,
             window_start=window_start,

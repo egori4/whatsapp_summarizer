@@ -149,3 +149,31 @@ def test_retention_must_be_non_negative(tmp_path):
     body = BASE.replace("processed_raw_days: 7", "processed_raw_days: -1")
     with pytest.raises(ConfigError, match="processed_raw_days"):
         load_config(write_config(tmp_path, body))
+
+
+def test_email_defaults_are_normalized(tmp_path):
+    cfg = load_config(write_config(tmp_path))
+    assert cfg.email["host"] == "smtp.example.com"
+    assert cfg.email["port"] == 587
+    assert cfg.email["sender"] == "digest@example.com"
+    assert cfg.email["username"] is None
+    assert cfg.email["starttls"] is True
+    assert cfg.email["timeout_seconds"] == 30
+
+
+def test_invalid_email_subject_placeholder_is_rejected(tmp_path):
+    body = BASE.replace(
+        "attach_raw_messages: true",
+        'attach_raw_messages: true\n        subject: "{recipient}"',
+    )
+    with pytest.raises(ConfigError, match="unsupported placeholder"):
+        load_config(write_config(tmp_path, body))
+
+
+def test_email_starttls_must_be_boolean(tmp_path):
+    body = BASE.replace(
+        "password_env: DIGEST_PASSWORD",
+        'password_env: DIGEST_PASSWORD\n  starttls: "yes"',
+    )
+    with pytest.raises(ConfigError, match="email.starttls"):
+        load_config(write_config(tmp_path, body))

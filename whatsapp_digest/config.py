@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
+from string import Formatter
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,6 +15,8 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 _REASONING = {"inherit", "none", "minimal", "low", "medium", "high", "xhigh"}
+_ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SUBJECT_FIELDS = {"date", "workflow_name", "workflow_id", "run_id"}
 
 
 class ConfigError(ValueError):
@@ -128,6 +131,20 @@ def _validate_emails(values: Any, name: str, *, required: bool) -> list[str]:
     return result
 
 
+def _validate_subject_template(value: Any, name: str) -> str:
+    template = _nonempty(value, name)
+    if "\r" in template or "\n" in template:
+        raise ConfigError(f"{name} must be a single line")
+    try:
+        fields = [field for _literal, field, spec, conversion in Formatter().parse(template) if field]
+    except ValueError as exc:
+        raise ConfigError(f"{name} is not a valid format string") from exc
+    for field in fields:
+        if field not in _SUBJECT_FIELDS:
+            raise ConfigError(f"{name} contains unsupported placeholder: {field}")
+    return template
+
+
 def load_config(path: str | Path) -> AppConfig:
     source = Path(path).expanduser().resolve()
     if not source.is_file():
@@ -169,12 +186,34 @@ def load_config(path: str | Path) -> AppConfig:
         raise ConfigError("whatsapp.poll_interval_seconds must be between 0.1 and 60")
     whatsapp = {"bridge_url": bridge_url, "poll_interval_seconds": float(poll_interval)}
 
-    email = _mapping(root.get("email"), "email")
-    for key in ("host", "sender", "password_env"):
-        _nonempty(email.get(key), f"email.{key}")
-    port = email.get("port", 587)
+    email_raw = _mapping(root.get("email"), "email")
+    host = _nonempty(email_raw.get("host"), "email.host")
+    sender = _nonempty(email_raw.get("sender"), "email.sender")
+    if not _EMAIL_RE.fullmatch(sender):
+        raise ConfigError("email.sender must be a valid email address")
+    password_env = _nonempty(email_raw.get("password_env"), "email.password_env")
+    if not _ENV_RE.fullmatch(password_env):
+        raise ConfigError("email.password_env must be a valid environment variable name")
+    username_raw = email_raw.get("username")
+    username = None if username_raw is None else _nonempty(username_raw, "email.username")
+    port = email_raw.get("port", 587)
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise ConfigError("email.port must be between 1 and 65535")
+    starttls = email_raw.get("starttls", True)
+    if not isinstance(starttls, bool):
+        raise ConfigError("email.starttls must be boolean")
+    email_timeout = email_raw.get("timeout_seconds", 30)
+    if not isinstance(email_timeout, int) or isinstance(email_timeout, bool) or email_timeout <= 0:
+        raise ConfigError("email.timeout_seconds must be a positive integer")
+    email = {
+        "host": host,
+        "port": port,
+        "sender": sender,
+        "username": username,
+        "password_env": password_env,
+        "starttls": starttls,
+        "timeout_seconds": email_timeout,
+    }
 
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timezone = _timezone(defaults.get("timezone", "America/Toronto"), "defaults.timezone")
@@ -236,7 +275,10 @@ def load_config(path: str | Path) -> AppConfig:
         attach_raw = workflow_email.get("attach_raw_messages", True)
         if not isinstance(attach_raw, bool):
             raise ConfigError(f"{prefix}.delivery.email.attach_raw_messages must be boolean")
-        subject = _nonempty(workflow_email.get("subject", "{workflow_name} — {date}"), f"{prefix}.delivery.email.subject")
+        subject = _validate_subject_template(
+            workflow_email.get("subject", "{workflow_name} — {date}"),
+            f"{prefix}.delivery.email.subject",
+        )
 
         workflows.append(WorkflowConfig(
             id=workflow_id,
