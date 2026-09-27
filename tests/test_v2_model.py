@@ -71,7 +71,8 @@ def test_agent_kwargs_are_tool_free_and_ephemeral(monkeypatch):
     assert kwargs["enabled_toolsets"] == []
     assert kwargs["skip_context_files"] is True
     assert kwargs["skip_memory"] is True
-    assert kwargs["persist_session"] is False
+    assert "persist_session" not in kwargs
+    assert kwargs["skip_background_review"] is True
     assert kwargs["save_trajectories"] is False
     assert kwargs["fallback_model"] is None
     assert kwargs["max_iterations"] == 1
