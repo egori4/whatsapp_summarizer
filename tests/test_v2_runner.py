@@ -177,3 +177,40 @@ def test_non_dry_run_is_blocked_until_delivery_phase(tmp_path):
     cfg = make_config(tmp_path)
     with pytest.raises(RunnerError, match="Phase 5"):
         run_workflow(cfg, "tests", last="24h", dry_run=False, now=NOW, gateway=FakeGateway())
+
+
+def test_raw_export_uses_gateway_source_records_not_reread_database(tmp_path):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Database text")
+
+    class ExactGateway:
+        def summarize(self, workflow, rows):
+            return ModelInvocationResult(
+                raw_output='{"sections":[]}',
+                provider="openai-codex",
+                model="gpt-6-sol",
+                reasoning="medium",
+                source_records=(
+                    {
+                        "source_id": "m1",
+                        "timestamp": "2026-09-27T14:00:00+00:00",
+                        "sender": "Olesya",
+                        "text": "Exact text supplied to Hermes",
+                    },
+                ),
+            )
+
+    result = run_workflow(
+        cfg,
+        "tests",
+        last="24h",
+        dry_run=True,
+        now=NOW,
+        gateway=ExactGateway(),
+    )
+
+    assert "Exact text supplied to Hermes" in result.raw_text
+    assert "Database text" not in result.raw_text
+    assert "Provider: openai-codex" in result.rendered_text
+    assert "Model: gpt-6-sol" in result.rendered_text
