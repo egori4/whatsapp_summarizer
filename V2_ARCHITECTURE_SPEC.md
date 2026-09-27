@@ -1116,19 +1116,29 @@ DoD:
 
 Deliver:
 
-- model settings resolution;
+- model settings resolution from the active Hermes config on every run;
 - inherit/partial override/full override;
-- Ollama selection through Hermes;
+- Ollama/custom endpoint selection through Hermes provider resolution;
+- invoke the documented Hermes `AIAgent` Python interface using the existing Hermes virtual environment;
+- owner-only temporary request/result files so raw source text is not exposed in process arguments;
 - one-call structured summarizer;
+- ephemeral digest-specific system prompt;
+- `enabled_toolsets=[]`, memory/context-file loading disabled, session persistence disabled, and no fallback model;
 - shared trust-boundary prompt;
 - structural validator;
 - dry-run integration.
 
 DoD:
 
-- only one model call per run;
+- only one model turn per run;
+- no Hermes tools are available to the summarization call;
 - prompt injection cannot alter runtime settings/tools/recipients;
 - invalid result fails without checkpoint movement;
+- dry-run never initializes or advances the workflow checkpoint;
+- source IDs in output must exist in the selected input;
+- participant attribution must exactly match supplied safe display names;
+- output URLs must occur in the cited source messages;
+- empty configured sections and a completely empty material result are valid;
 - actual resolved provider/model/reasoning available for report metadata.
 
 ### Phase 4 — renderer + raw QA
