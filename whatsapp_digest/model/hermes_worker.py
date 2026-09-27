@@ -82,7 +82,7 @@ def build_agent_kwargs(runtime: dict[str, Any], resolved: dict[str, Any], system
         "quiet_mode": True,
         "skip_context_files": True,
         "skip_memory": True,
-        "persist_session": False,
+        "skip_background_review": True,
         "save_trajectories": False,
         "fallback_model": None,
         "ephemeral_system_prompt": system_prompt,
@@ -91,6 +91,12 @@ def build_agent_kwargs(runtime: dict[str, Any], resolved: dict[str, Any], system
 
 
 def execute_request(request: dict[str, Any]) -> dict[str, Any]:
+    # The installed Hermes runtime bootstraps its managed dependency environment
+    # before third-party/Hermes imports. Keep this inside the real execution
+    # path so importing helper functions for unit tests does not require a
+    # Hermes checkout on sys.path.
+    import hermes_bootstrap  # noqa: F401
+
     from dotenv import load_dotenv
     from hermes_constants import get_hermes_home
     from hermes_cli.runtime_provider import resolve_runtime_provider, format_runtime_provider_error
