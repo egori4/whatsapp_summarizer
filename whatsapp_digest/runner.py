@@ -10,7 +10,9 @@ from zoneinfo import ZoneInfo
 
 from .config import AppConfig, WorkflowConfig
 from .database import DigestDatabase
-from .model.hermes import HermesModelGateway, HermesGatewayError, ModelInvocationResult
+from .model.hermes import HermesModelGateway, HermesGatewayError, ModelInvocationResult, source_record
+from .raw_export import render_raw_messages
+from .renderer import RenderContext, render_digest
 from .validation import DigestValidationError, validate_digest
 
 
@@ -34,6 +36,9 @@ class RunResult:
     model: str | None = None
     reasoning: str | None = None
     digest: dict[str, Any] | None = None
+    rendered_text: str | None = None
+    rendered_html: str | None = None
+    raw_text: str | None = None
 
 
 def _parse_last(value: str, *, now: datetime) -> datetime:
@@ -169,6 +174,23 @@ def run_workflow(
             )
             raise RunnerError(f"model output validation failed: {exc}") from exc
 
+        render_context = RenderContext(
+            workflow_name=workflow.name,
+            workflow_id=workflow.id,
+            run_id=run_id,
+            generated_at=current.astimezone(ZoneInfo(workflow.timezone)),
+            timezone=workflow.timezone,
+            provider=model_result.provider,
+            model=model_result.model,
+            reasoning=model_result.reasoning,
+            message_count=len(usable),
+            window_start=window_start,
+            window_end=window_end,
+        )
+        rendered = render_digest(digest, render_context)
+        model_records = model_result.source_records or tuple(source_record(row) for row in usable)
+        raw_text = render_raw_messages(model_records, render_context)
+
         db.finish_run(
             run_id,
             status="dry-run-success",
@@ -189,4 +211,7 @@ def run_workflow(
             model=model_result.model,
             reasoning=model_result.reasoning,
             digest=digest,
+            rendered_text=rendered.text,
+            rendered_html=rendered.html,
+            raw_text=raw_text,
         )
