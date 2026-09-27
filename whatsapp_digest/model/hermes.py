@@ -72,6 +72,7 @@ class ModelInvocationResult:
     provider: str
     model: str
     reasoning: str
+    source_records: tuple[dict[str, str], ...] = ()
 
 
 _PHONEISH_RE = re.compile(r"^\+?[0-9][0-9\s().-]{6,}$")
@@ -241,4 +242,5 @@ class HermesModelGateway:
                 provider=str(result.get("provider") or "unknown"),
                 model=str(result.get("model") or "unknown"),
                 reasoning=str(result.get("reasoning") or "unknown"),
+                source_records=tuple(records),
             )
