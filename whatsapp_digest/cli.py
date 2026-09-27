@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import json
 import sys
 
 from .config import ConfigError, load_config
 from .database import DigestDatabase
 from .collector import WhatsAppCollector
+from .runner import RunnerError, run_workflow
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,6 +30,13 @@ def _parser() -> argparse.ArgumentParser:
     collector_sub = collector.add_subparsers(dest="collector_command", required=True)
     collector_sub.add_parser("once")
     collector_sub.add_parser("run")
+
+    run = sub.add_parser("run")
+    run.add_argument("workflow", help="Workflow ID")
+    window = run.add_mutually_exclusive_group()
+    window.add_argument("--last", help="Initial/manual window such as 24h or 2d")
+    window.add_argument("--since", help="Initial/manual start time (ISO-8601 or YYYY-MM-DD HH:MM)")
+    run.add_argument("--dry-run", action="store_true", help="Generate and validate without email or checkpoint update")
 
     return parser
 
@@ -105,6 +113,32 @@ def _cmd_collector(path: str, *, once: bool) -> int:
     return 0
 
 
+def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, dry_run: bool) -> int:
+    cfg = load_config(path)
+    result = run_workflow(
+        cfg,
+        workflow,
+        last=last,
+        since=since,
+        dry_run=dry_run,
+    )
+    print(f"Run ID: {result.run_id}")
+    print(f"Workflow: {result.workflow_id}")
+    print(f"Status: {result.status}")
+    print(f"Messages: {result.message_count}")
+    if result.provider:
+        print(f"Provider: {result.provider}")
+    if result.model:
+        print(f"Model: {result.model}")
+    if result.reasoning:
+        print(f"Reasoning: {result.reasoning}")
+    if result.window_start or result.window_end:
+        print(f"Window: {result.window_start or '-'} -> {result.window_end or '-'}")
+    print()
+    print(json.dumps(result.digest or {"sections": []}, indent=2, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -116,8 +150,16 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_groups(args.config)
         if args.command == "collector":
             return _cmd_collector(args.config, once=args.collector_command == "once")
-    except ConfigError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
+        if args.command == "run":
+            return _cmd_run(
+                args.config,
+                workflow=args.workflow,
+                last=args.last,
+                since=args.since,
+                dry_run=args.dry_run,
+            )
+    except (ConfigError, RunnerError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
         print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
