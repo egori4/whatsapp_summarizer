@@ -82,6 +82,7 @@ def build_agent_kwargs(runtime: dict[str, Any], resolved: dict[str, Any], system
         "quiet_mode": True,
         "skip_context_files": True,
         "skip_memory": True,
+        "persist_session": False,
         "save_trajectories": False,
         "fallback_model": None,
         "ephemeral_system_prompt": system_prompt,
