@@ -16,10 +16,6 @@ _HERMES_ROOT = os.environ.get("HERMES_AGENT_ROOT", "").strip()
 if _HERMES_ROOT and _HERMES_ROOT not in sys.path:
     sys.path.insert(0, _HERMES_ROOT)
 
-# Hermes source installs may re-exec from a legacy venv into the PM-managed
-# interpreter. Bootstrap before importing any Hermes/third-party dependency so
-# the committed dependency environment is activated in the relaunched process.
-import hermes_bootstrap  # noqa: F401,E402
 
 
 class WorkerError(RuntimeError):
@@ -86,7 +82,6 @@ def build_agent_kwargs(runtime: dict[str, Any], resolved: dict[str, Any], system
         "quiet_mode": True,
         "skip_context_files": True,
         "skip_memory": True,
-        "skip_background_review": True,
         "save_trajectories": False,
         "fallback_model": None,
         "ephemeral_system_prompt": system_prompt,
