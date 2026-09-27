@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
-import json
+import os
+from pathlib import Path
 import sys
 
 from .config import ConfigError, load_config
 from .database import DigestDatabase
 from .collector import WhatsAppCollector
-from .runner import RunnerError, run_workflow
+from .runner import RunnerError, RunResult, run_workflow
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -113,6 +114,27 @@ def _cmd_collector(path: str, *, once: bool) -> int:
     return 0
 
 
+def _write_private_text(path: Path, content: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def _save_dry_run_artifacts(database_path: Path, result: RunResult) -> Path | None:
+    if result.rendered_text is None or result.rendered_html is None or result.raw_text is None:
+        return None
+    root = database_path.parent / "dry-runs" / result.run_id
+    root.mkdir(parents=True, exist_ok=False, mode=0o700)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
+    _write_private_text(root / "digest.txt", result.rendered_text)
+    _write_private_text(root / "digest.html", result.rendered_html)
+    _write_private_text(root / "raw_messages.txt", result.raw_text)
+    return root
+
+
 def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, dry_run: bool) -> int:
     cfg = load_config(path)
     result = run_workflow(
@@ -122,20 +144,21 @@ def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, d
         since=since,
         dry_run=dry_run,
     )
+    if result.rendered_text:
+        print(result.rendered_text.rstrip())
+        artifact_dir = _save_dry_run_artifacts(cfg.database_path, result)
+        if artifact_dir:
+            print()
+            print(f"Dry-run artifacts: {artifact_dir}")
+            print(f"  Text: {artifact_dir / 'digest.txt'}")
+            print(f"  HTML: {artifact_dir / 'digest.html'}")
+            print(f"  Raw:  {artifact_dir / 'raw_messages.txt'}")
+        return 0
+
     print(f"Run ID: {result.run_id}")
     print(f"Workflow: {result.workflow_id}")
     print(f"Status: {result.status}")
     print(f"Messages: {result.message_count}")
-    if result.provider:
-        print(f"Provider: {result.provider}")
-    if result.model:
-        print(f"Model: {result.model}")
-    if result.reasoning:
-        print(f"Reasoning: {result.reasoning}")
-    if result.window_start or result.window_end:
-        print(f"Window: {result.window_start or '-'} -> {result.window_end or '-'}")
-    print()
-    print(json.dumps(result.digest or {"sections": []}, indent=2, ensure_ascii=False))
     return 0
 
 
