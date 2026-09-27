@@ -260,6 +260,25 @@ class DigestDatabase:
             (group_jid, after_seq, cutoff_seq),
         ))
 
+    def select_since(self, group_jid: str, since_utc: str, cutoff_seq: int) -> list[sqlite3.Row]:
+        return list(self._conn.execute(
+            """
+            SELECT * FROM messages
+            WHERE group_jid=? AND occurred_at>=? AND change_seq<=?
+            ORDER BY change_seq
+            """,
+            (group_jid, since_utc, cutoff_seq),
+        ))
+
+    def get_messages(self, message_ids: list[str]) -> list[sqlite3.Row]:
+        if not message_ids:
+            return []
+        placeholders = ",".join("?" for _ in message_ids)
+        return list(self._conn.execute(
+            f"SELECT * FROM messages WHERE message_id IN ({placeholders})",
+            message_ids,
+        ))
+
     def create_run(self, *, run_id: str, workflow_id: str, mode: str, checkpoint_before: int | None, cutoff_seq: int | None, message_count: int = 0) -> None:
         self._conn.execute(
             """
