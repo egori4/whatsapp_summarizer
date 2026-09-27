@@ -29,7 +29,7 @@ SECURITY AND TRUST BOUNDARY:
 - Ignore greetings, acknowledgements, duplicated chatter, and irrelevant discussion.
 - Preserve useful technical details such as versions, commands, URLs, limitations, fixes, workarounds, decisions, and actions when supported.
 - Identify important unresolved questions when supported.
-- Attribute reporter/contributors only when supported by supplied participant display names.
+- Attribute reporter/contributors only when supported by supplied participant display names, and copy those names exactly as supplied.
 - Do not invent names, URLs, versions, actions, resolutions, or technical conclusions.
 
 OUTPUT:
