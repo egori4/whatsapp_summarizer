@@ -1145,17 +1145,24 @@ DoD:
 
 Deliver:
 
-- text renderer;
-- HTML renderer;
+- deterministic text renderer;
+- deterministic HTML renderer with all model/source text escaped;
 - raw TXT exporter;
-- optional/non-empty section handling.
+- optional/non-empty section handling;
+- dry-run artifacts written under the local database directory as owner-only files:
+  - `digest.txt`
+  - `digest.html`
+  - `raw_messages.txt`
 
 DoD:
 
 - empty sections omitted;
 - no-section workflows render valid output;
-- raw attachment matches exact model source window;
-- model metadata appears in output.
+- raw attachment is generated from the exact sanitized source-record list supplied to Hermes rather than rereading current database state;
+- model metadata appears in output;
+- HTML cannot interpret model/source text as markup;
+- dry-run artifact directories are owner-only and artifact files are mode 0600;
+- dry-run still does not initialize or advance the workflow checkpoint.
 
 ### Phase 5 — email + checkpoint
 
