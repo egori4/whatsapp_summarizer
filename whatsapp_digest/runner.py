@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
 import re
 from string import Formatter
 from typing import Any
@@ -13,10 +14,14 @@ from .config import AppConfig, WorkflowConfig
 from .database import DigestDatabase
 from .delivery.base import DeliveryChannel, DeliveryError
 from .delivery.email import EmailDelivery
+from .locking import WorkflowBusyError, workflow_lock
 from .model.hermes import HermesModelGateway, HermesGatewayError, ModelInvocationResult, source_record
 from .raw_export import render_raw_messages
 from .renderer import RenderContext, render_digest
 from .validation import DigestValidationError, validate_digest
+
+
+logger = logging.getLogger(__name__)
 
 
 class RunnerError(RuntimeError):
@@ -114,13 +119,14 @@ def _notify_failure(
         pass
 
 
-def run_workflow(
+def _run_workflow_unlocked(
     config: AppConfig,
     workflow_id: str,
     *,
     last: str | None = None,
     since: str | None = None,
     dry_run: bool = False,
+    scheduled: bool = False,
     now: datetime | None = None,
     gateway: HermesModelGateway | None = None,
     delivery: DeliveryChannel | None = None,
@@ -132,7 +138,7 @@ def run_workflow(
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     local_now = current.astimezone(ZoneInfo(workflow.timezone))
     run_id = _new_run_id(workflow.id, current)
-    mode = "dry-run" if dry_run else "run"
+    mode = "dry-run" if dry_run else ("scheduled" if scheduled else "run")
     channel = delivery or EmailDelivery(config)
 
     with DigestDatabase(config.database_path) as db:
@@ -140,6 +146,14 @@ def run_workflow(
         initialized = bool(state["initialized"])
         checkpoint = int(state["checkpoint_seq"] or 0)
         cutoff = db.latest_seq()
+        logger.info(
+            "[%s] run started run_id=%s mode=%s checkpoint=%s cutoff=%s",
+            workflow.id,
+            run_id,
+            mode,
+            checkpoint if initialized else "uninitialized",
+            cutoff,
+        )
 
         explicit_since: datetime | None = None
         if last:
@@ -148,6 +162,31 @@ def run_workflow(
             explicit_since = _parse_since(since, workflow=workflow)
 
         if not initialized and explicit_since is None:
+            if scheduled:
+                db.create_run(
+                    run_id=run_id,
+                    workflow_id=workflow.id,
+                    mode=mode,
+                    checkpoint_before=None,
+                    cutoff_seq=cutoff,
+                    message_count=0,
+                )
+                db.finish_run(run_id, status="needs-initial-run")
+                logger.warning(
+                    "[%s] scheduled run skipped state=NEEDS_INITIAL_RUN run_id=%s",
+                    workflow.id,
+                    run_id,
+                )
+                return RunResult(
+                    run_id=run_id,
+                    workflow_id=workflow.id,
+                    status="needs-initial-run",
+                    message_count=0,
+                    cutoff_seq=cutoff,
+                    window_start=None,
+                    window_end=None,
+                    digest={"sections": []},
+                )
             raise RunnerError(
                 f"workflow '{workflow.id}' needs its initial window; use --last or --since"
             )
@@ -162,6 +201,12 @@ def run_workflow(
             if not row["deleted"] and bool((row["text"] or row["caption"] or "").strip())
         ]
         window_start, window_end = _window(usable)
+        logger.info(
+            "[%s] selected_messages=%d pending_changes=%d",
+            workflow.id,
+            len(usable),
+            len(rows),
+        )
 
         db.create_run(
             run_id=run_id,
@@ -224,6 +269,14 @@ def run_workflow(
                 )
             raise RunnerError(f"model generation failed: {exc}") from exc
 
+        logger.info(
+            "[%s] provider=%s model=%s reasoning=%s",
+            workflow.id,
+            model_result.provider,
+            model_result.model,
+            model_result.reasoning,
+        )
+
         try:
             digest = validate_digest(model_result.raw_output, workflow, usable)
         except DigestValidationError as exc:
@@ -243,6 +296,8 @@ def run_workflow(
                     reason=reason, local_now=local_now,
                 )
             raise RunnerError(f"model output validation failed: {exc}") from exc
+
+        logger.info("[%s] validation passed run_id=%s", workflow.id, run_id)
 
         render_context = RenderContext(
             workflow_name=workflow.name,
@@ -379,6 +434,12 @@ def run_workflow(
             model=model_result.model,
             reasoning=model_result.reasoning,
         )
+        logger.info(
+            "[%s] checkpoint advanced run_id=%s checkpoint=%s status=delivered",
+            workflow.id,
+            run_id,
+            cutoff,
+        )
         return RunResult(
             run_id=run_id,
             workflow_id=workflow.id,
@@ -395,3 +456,35 @@ def run_workflow(
             rendered_html=rendered.html,
             raw_text=raw_text,
         )
+
+
+
+def run_workflow(
+    config: AppConfig,
+    workflow_id: str,
+    *,
+    last: str | None = None,
+    since: str | None = None,
+    dry_run: bool = False,
+    scheduled: bool = False,
+    now: datetime | None = None,
+    gateway: HermesModelGateway | None = None,
+    delivery: DeliveryChannel | None = None,
+) -> RunResult:
+    workflow = config.workflow(workflow_id)
+    try:
+        with workflow_lock(config.database_path, workflow.id):
+            return _run_workflow_unlocked(
+                config,
+                workflow_id,
+                last=last,
+                since=since,
+                dry_run=dry_run,
+                scheduled=scheduled,
+                now=now,
+                gateway=gateway,
+                delivery=delivery,
+            )
+    except WorkflowBusyError as exc:
+        logger.warning("[%s] duplicate concurrent run blocked", workflow.id)
+        raise RunnerError(str(exc)) from exc

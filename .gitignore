@@ -30,3 +30,6 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local scheduler secrets; loaded by generated systemd user services.
+digest.env

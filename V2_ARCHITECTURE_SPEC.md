@@ -1195,17 +1195,24 @@ Delivery is intentionally at-least-once: if SMTP accepts an email and the proces
 Deliver:
 
 - systemd user timer generation/install/status/remove;
-- daily/weekly/monthly;
-- timezone;
-- manual-only behavior;
-- per-workflow lock.
+- daily/weekly/monthly calendars with explicit workflow timezone;
+- manual-only workflows remain unscheduled;
+- scheduled services invoke the same `digest run` / runner path as manual execution, with an internal `--scheduled` marker only to make uninitialized behavior non-failing;
+- `Persistent=true` timers so missed runs may execute when the user manager resumes;
+- optional owner-local `digest.env` loaded by generated services for SMTP secrets; it is never committed;
+- per-workflow non-blocking local file lock;
+- safe workflow IDs suitable for lock files and systemd unit names.
 
 DoD:
 
 - generated timers match configuration;
-- uninitialized workflows are never auto-initialized;
-- scheduled path uses same runner as manual path;
-- concurrent duplicate workflow run is prevented.
+- uninitialized workflows record/log `NEEDS_INITIAL_RUN` and are never auto-initialized;
+- scheduled path uses the same runner as manual path;
+- concurrent duplicate workflow run is prevented;
+- authenticated SMTP schedule installation requires an owner-only `digest.env`;
+- removing or de-scheduling a workflow removes stale generated timer units.
+
+Phase 6 intentionally schedules digest execution only. The standalone upstream WhatsApp bridge and collector lifecycle remain separate transport concerns. Before Phase 7 is called unattended/production-ready, the pilot must explicitly supervise both so collection survives logout/reboot.
 
 ### Phase 7 — pilot/acceptance
 

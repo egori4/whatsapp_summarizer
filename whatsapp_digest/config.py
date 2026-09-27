@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 _GROUP_JID_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?@g\.us$")
+_WORKFLOW_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
@@ -229,6 +230,10 @@ def load_config(path: str | Path) -> AppConfig:
         prefix = f"workflows[{index}]"
         workflow = _mapping(item, prefix)
         workflow_id = _nonempty(workflow.get("id"), f"{prefix}.id")
+        if not _WORKFLOW_ID_RE.fullmatch(workflow_id):
+            raise ConfigError(
+                f"{prefix}.id must use only letters, numbers, dot, underscore, or hyphen"
+            )
         if workflow_id in seen_ids:
             raise ConfigError(f"duplicate workflow id: {workflow_id}")
         seen_ids.add(workflow_id)

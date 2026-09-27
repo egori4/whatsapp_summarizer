@@ -177,3 +177,10 @@ def test_email_starttls_must_be_boolean(tmp_path):
     )
     with pytest.raises(ConfigError, match="email.starttls"):
         load_config(write_config(tmp_path, body))
+
+
+@pytest.mark.parametrize("workflow_id", ["../bad", "bad/name", "space id", "-leading"])
+def test_unsafe_workflow_id_rejected(tmp_path, workflow_id):
+    body = BASE.replace("id: global-ps", f"id: {workflow_id}")
+    with pytest.raises(ConfigError, match="letters, numbers"):
+        load_config(write_config(tmp_path, body))

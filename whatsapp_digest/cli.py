@@ -13,6 +13,13 @@ from .delivery.base import DeliveryError
 from .delivery.email import EmailDelivery
 from .logging_setup import setup_logging
 from .runner import RunnerError, RunResult, run_workflow
+from .systemd import (
+    ScheduleError,
+    install_schedules,
+    remove_schedules,
+    schedule_env_file,
+    schedule_status,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -24,7 +31,8 @@ def _parser() -> argparse.ArgumentParser:
     config_sub = config.add_subparsers(dest="config_command", required=True)
     config_sub.add_parser("validate")
 
-    sub.add_parser("status")
+    status = sub.add_parser("status")
+    status.add_argument("workflow", nargs="?", help="Optional workflow ID")
 
     whatsapp = sub.add_parser("whatsapp")
     whatsapp_sub = whatsapp.add_subparsers(dest="whatsapp_command", required=True)
@@ -46,6 +54,13 @@ def _parser() -> argparse.ArgumentParser:
     window.add_argument("--last", help="Initial/manual window such as 24h or 2d")
     window.add_argument("--since", help="Initial/manual start time (ISO-8601 or YYYY-MM-DD HH:MM)")
     run.add_argument("--dry-run", action="store_true", help="Generate and validate without email or checkpoint update")
+    run.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
+
+    schedule = sub.add_parser("schedule")
+    schedule_sub = schedule.add_subparsers(dest="schedule_command", required=True)
+    schedule_sub.add_parser("install")
+    schedule_sub.add_parser("status")
+    schedule_sub.add_parser("remove")
 
     return parser
 
@@ -57,10 +72,11 @@ def _cmd_validate(path: str) -> int:
     return 0
 
 
-def _cmd_status(path: str) -> int:
+def _cmd_status(path: str, workflow_id: str | None = None) -> int:
     cfg = load_config(path)
+    workflows = (cfg.workflow(workflow_id),) if workflow_id else cfg.workflows
     with DigestDatabase(cfg.database_path) as db:
-        for workflow in cfg.workflows:
+        for workflow in workflows:
             state = db.workflow_state(workflow.id)
             pending = db.pending_count(workflow.id, workflow.group_jid)
             if state["initialized"]:
@@ -138,6 +154,45 @@ def _cmd_email_test(path: str, workflow_id: str) -> int:
     return 0
 
 
+def _cmd_schedule(path: str, command: str) -> int:
+    cfg = load_config(path)
+    if command == "install":
+        env_file = schedule_env_file(cfg)
+        if cfg.email.get("username"):
+            if not env_file.is_file():
+                raise ScheduleError(
+                    f"scheduled SMTP authentication requires {env_file}; "
+                    f"create it with {cfg.email['password_env']}=... and chmod 600"
+                )
+            if env_file.stat().st_mode & 0o077:
+                raise ScheduleError(f"{env_file} must not be accessible by group/others; run chmod 600")
+        units = install_schedules(cfg)
+        if not units:
+            print("No scheduled workflows configured; nothing installed.")
+            return 0
+        for unit in units:
+            print(f"{unit.workflow_id}: {unit.timer_name}")
+            print(f"  OnCalendar: {unit.on_calendar}")
+        print(f"SMTP environment file: {env_file}")
+        return 0
+
+    if command == "status":
+        for item in schedule_status(cfg):
+            print(item["workflow_id"])
+            print(f"  Schedule: {item['schedule']}")
+            print(f"  Enabled: {item['enabled']}")
+            print(f"  Active: {item['active']}")
+        return 0
+
+    removed = remove_schedules(cfg)
+    if removed:
+        for name in removed:
+            print(f"Removed: {name}")
+    else:
+        print("No generated digest schedules found.")
+    return 0
+
+
 def _write_private_text(path: Path, content: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -159,7 +214,15 @@ def _save_dry_run_artifacts(database_path: Path, result: RunResult) -> Path | No
     return root
 
 
-def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, dry_run: bool) -> int:
+def _cmd_run(
+    path: str,
+    *,
+    workflow: str,
+    last: str | None,
+    since: str | None,
+    dry_run: bool,
+    scheduled: bool,
+) -> int:
     cfg = load_config(path)
     result = run_workflow(
         cfg,
@@ -167,6 +230,7 @@ def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, d
         last=last,
         since=since,
         dry_run=dry_run,
+        scheduled=scheduled,
     )
     if dry_run and result.rendered_text:
         print(result.rendered_text.rstrip())
@@ -205,13 +269,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "config" and args.config_command == "validate":
             return _cmd_validate(args.config)
         if args.command == "status":
-            return _cmd_status(args.config)
+            return _cmd_status(args.config, args.workflow)
         if args.command == "whatsapp" and args.whatsapp_command == "groups":
             return _cmd_groups(args.config)
         if args.command == "collector":
             return _cmd_collector(args.config, once=args.collector_command == "once")
         if args.command == "email" and args.email_command == "test":
             return _cmd_email_test(args.config, args.workflow)
+        if args.command == "schedule":
+            return _cmd_schedule(args.config, args.schedule_command)
         if args.command == "run":
             return _cmd_run(
                 args.config,
@@ -219,8 +285,9 @@ def main(argv: list[str] | None = None) -> int:
                 last=args.last,
                 since=args.since,
                 dry_run=args.dry_run,
+                scheduled=args.scheduled,
             )
-    except (ConfigError, RunnerError, DeliveryError) as exc:
+    except (ConfigError, RunnerError, DeliveryError, ScheduleError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:

@@ -337,3 +337,46 @@ def test_raw_export_uses_gateway_source_records_not_reread_database(tmp_path):
     assert "Database text" not in result.raw_text
     assert "Provider: openai-codex" in result.rendered_text
     assert "Model: gpt-6-sol" in result.rendered_text
+
+
+def test_scheduled_uninitialized_workflow_is_skipped_cleanly(tmp_path):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Pending before initialization")
+
+    gateway = FakeGateway(material_output())
+    delivery = FakeDelivery()
+    result = run_workflow(
+        cfg,
+        "tests",
+        scheduled=True,
+        now=NOW,
+        gateway=gateway,
+        delivery=delivery,
+    )
+
+    assert result.status == "needs-initial-run"
+    assert gateway.calls == []
+    assert delivery.digests == []
+    assert delivery.failures == []
+    with DigestDatabase(cfg.database_path) as db:
+        state = db.workflow_state("tests")
+        assert state["initialized"] == 0
+        assert state["checkpoint_seq"] is None
+
+
+def test_runner_blocks_concurrent_same_workflow(tmp_path):
+    from whatsapp_digest.locking import workflow_lock
+
+    cfg = make_config(tmp_path)
+    with workflow_lock(cfg.database_path, "tests"):
+        with pytest.raises(RunnerError, match="already running"):
+            run_workflow(
+                cfg,
+                "tests",
+                last="24h",
+                dry_run=True,
+                now=NOW,
+                gateway=FakeGateway(),
+                delivery=FakeDelivery(),
+            )
