@@ -12,6 +12,10 @@ from pathlib import Path
 import sys
 from typing import Any
 
+_HERMES_ROOT = os.environ.get("HERMES_AGENT_ROOT", "").strip()
+if _HERMES_ROOT and _HERMES_ROOT not in sys.path:
+    sys.path.insert(0, _HERMES_ROOT)
+
 
 class WorkerError(RuntimeError):
     pass
@@ -140,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
             "error": str(exc),
         }
     result_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    try:
+        result_path.chmod(0o600)
+    except OSError:
+        pass
     return 0 if result.get("ok") else 1
 
 
