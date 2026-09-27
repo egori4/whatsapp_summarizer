@@ -1,13 +1,17 @@
 """SMTP email delivery for WhatsApp Technical Digest v2."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from email.message import EmailMessage
+import logging
 import os
 import smtplib
 from typing import Any, Callable
 
 from .base import DeliveryError
 from ..config import AppConfig, WorkflowConfig
+
+logger = logging.getLogger(__name__)
 
 
 class EmailDelivery:
@@ -29,6 +33,18 @@ class EmailDelivery:
         password = os.environ.get(password_env)
         if cfg.get("username") and password is None:
             raise DeliveryError(f"SMTP password environment variable is not set: {password_env}")
+
+        run_id = message.get("X-WhatsApp-Digest-Run-ID", "unknown")
+        logger.info(
+            "smtp connect run_id=%s host=%s port=%s starttls=%s username_set=%s sender=%s recipients=%s",
+            run_id,
+            cfg["host"],
+            cfg["port"],
+            cfg["starttls"],
+            bool(cfg.get("username")),
+            cfg["sender"],
+            ",".join(recipients),
+        )
         try:
             with self._smtp_factory(
                 cfg["host"],
@@ -41,11 +57,30 @@ class EmailDelivery:
                     smtp.ehlo()
                 if cfg.get("username"):
                     smtp.login(cfg["username"], password or "")
-                smtp.send_message(message, to_addrs=recipients)
+                refused = smtp.send_message(message, to_addrs=recipients)
+                if refused:
+                    refused_list = ",".join(sorted(str(address) for address in refused))
+                    logger.error(
+                        "smtp refused recipients run_id=%s recipients=%s",
+                        run_id,
+                        refused_list,
+                    )
+                    raise DeliveryError(f"SMTP refused recipients: {refused_list}")
         except DeliveryError:
             raise
         except Exception as exc:
+            logger.exception(
+                "smtp transaction failed run_id=%s error_type=%s",
+                run_id,
+                type(exc).__name__,
+            )
             raise DeliveryError(f"SMTP delivery failed: {type(exc).__name__}: {exc}") from exc
+
+        logger.info(
+            "smtp accepted run_id=%s recipient_count=%d",
+            run_id,
+            len(recipients),
+        )
 
     def send_digest(
         self,
@@ -106,3 +141,28 @@ class EmailDelivery:
             + "\n"
         )
         self._connect_and_send(message, recipients)
+
+    def send_test(self, workflow: WorkflowConfig) -> str:
+        run_id = "email-test-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        recipients = self._recipients(workflow)
+        message = EmailMessage()
+        message["From"] = self.config.email["sender"]
+        message["To"] = ", ".join(workflow.email["to"])
+        if workflow.email["cc"]:
+            message["Cc"] = ", ".join(workflow.email["cc"])
+        message["Subject"] = f"[Digest SMTP Test] {workflow.name}"
+        message["X-WhatsApp-Digest-Run-ID"] = run_id
+        message.set_content(
+            "\n".join(
+                [
+                    "WhatsApp Technical Digest SMTP test.",
+                    "",
+                    f"Workflow: {workflow.name}",
+                    f"Run ID: {run_id}",
+                    "This message contains no WhatsApp source content and does not change checkpoints.",
+                ]
+            )
+            + "\n"
+        )
+        self._connect_and_send(message, recipients)
+        return run_id

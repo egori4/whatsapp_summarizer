@@ -9,6 +9,9 @@ import sys
 from .config import ConfigError, load_config
 from .database import DigestDatabase
 from .collector import WhatsAppCollector
+from .delivery.base import DeliveryError
+from .delivery.email import EmailDelivery
+from .logging_setup import setup_logging
 from .runner import RunnerError, RunResult, run_workflow
 
 
@@ -31,6 +34,11 @@ def _parser() -> argparse.ArgumentParser:
     collector_sub = collector.add_subparsers(dest="collector_command", required=True)
     collector_sub.add_parser("once")
     collector_sub.add_parser("run")
+
+    email = sub.add_parser("email")
+    email_sub = email.add_subparsers(dest="email_command", required=True)
+    email_test = email_sub.add_parser("test")
+    email_test.add_argument("workflow", help="Workflow ID")
 
     run = sub.add_parser("run")
     run.add_argument("workflow", help="Workflow ID")
@@ -114,6 +122,22 @@ def _cmd_collector(path: str, *, once: bool) -> int:
     return 0
 
 
+def _cmd_email_test(path: str, workflow_id: str) -> int:
+    cfg = load_config(path)
+    workflow = cfg.workflow(workflow_id)
+    print(f"SMTP host: {cfg.email['host']}:{cfg.email['port']}")
+    print(f"STARTTLS: {cfg.email['starttls']}")
+    print(f"Sender: {cfg.email['sender']}")
+    print(f"Username: {cfg.email['username'] or '(none)'}")
+    print(f"Password env: {cfg.email['password_env']} ({'set' if os.environ.get(cfg.email['password_env']) else 'NOT SET'})")
+    print(f"To: {', '.join(workflow.email['to'])}")
+    print(f"Cc: {', '.join(workflow.email['cc']) if workflow.email['cc'] else '(none)'}")
+    run_id = EmailDelivery(cfg).send_test(workflow)
+    print(f"SMTP accepted test message. Run ID: {run_id}")
+    print(f"Log: {cfg.log_path}")
+    return 0
+
+
 def _write_private_text(path: Path, content: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -165,11 +189,18 @@ def _cmd_run(path: str, *, workflow: str, last: str | None, since: str | None, d
         print(f"Model: {result.model}")
     if result.reasoning:
         print(f"Reasoning: {result.reasoning}")
+    print(f"Log: {cfg.log_path}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    try:
+        cfg_for_logging = load_config(args.config)
+        setup_logging(cfg_for_logging.log_path, cfg_for_logging.log_days)
+    except ConfigError:
+        pass
+
     try:
         if args.command == "config" and args.config_command == "validate":
             return _cmd_validate(args.config)
@@ -179,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_groups(args.config)
         if args.command == "collector":
             return _cmd_collector(args.config, once=args.collector_command == "once")
+        if args.command == "email" and args.email_command == "test":
+            return _cmd_email_test(args.config, args.workflow)
         if args.command == "run":
             return _cmd_run(
                 args.config,
@@ -187,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                 since=args.since,
                 dry_run=args.dry_run,
             )
-    except (ConfigError, RunnerError) as exc:
+    except (ConfigError, RunnerError, DeliveryError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:

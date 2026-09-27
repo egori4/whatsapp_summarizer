@@ -162,3 +162,16 @@ def test_failure_email_contains_no_raw_source(tmp_path, monkeypatch):
     body = FakeSMTP.instances[-1].sent.get_body(preferencelist=("plain",)).get_content()
     assert "unknown source id" in body
     assert "No raw WhatsApp source content" in body
+
+
+def test_refused_recipient_is_reported_as_delivery_failure(tmp_path, monkeypatch):
+    class RefusingSMTP(FakeSMTP):
+        def send_message(self, message, to_addrs):
+            self.sent = message
+            self.to_addrs = list(to_addrs)
+            return {"two@example.com": (550, b"mailbox unavailable")}
+
+    cfg = make_config(tmp_path)
+    monkeypatch.setenv("DIGEST_PASSWORD", "secret")
+    with pytest.raises(DeliveryError, match="two@example.com"):
+        EmailDelivery(cfg, smtp_factory=RefusingSMTP).send_test(cfg.workflow("tests"))
