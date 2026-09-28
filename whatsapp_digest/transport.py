@@ -227,11 +227,27 @@ def install_transport(
     _write_unit(collector_path, units.collector_text)
     _verify_units([bridge_path, collector_path], executor=executor)
 
+    collector_was_active = (
+        _unit_state(COLLECTOR_SERVICE, "is-active", executor=executor) == "active"
+    )
+
     _run_systemctl(["daemon-reload"], executor=executor)
-    _run_systemctl(["enable", "--now", BRIDGE_SERVICE], executor=executor)
+
+    # Re-install must apply changed unit content immediately. "enable --now"
+    # does not restart an already-active service after daemon-reload.
+    _run_systemctl(["enable", BRIDGE_SERVICE], executor=executor)
+    _run_systemctl(
+        ["restart" if existing_bridge_active else "start", BRIDGE_SERVICE],
+        executor=executor,
+    )
     _active_or_raise(BRIDGE_SERVICE, executor=executor)
     _wait_bridge_connected(config)
-    _run_systemctl(["enable", "--now", COLLECTOR_SERVICE], executor=executor)
+
+    _run_systemctl(["enable", COLLECTOR_SERVICE], executor=executor)
+    _run_systemctl(
+        ["restart" if collector_was_active else "start", COLLECTOR_SERVICE],
+        executor=executor,
+    )
     _active_or_raise(COLLECTOR_SERVICE, executor=executor)
     return units
 

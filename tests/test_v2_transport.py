@@ -159,8 +159,10 @@ def test_install_writes_verifies_enables_and_checks_both_services(tmp_path, monk
     assert (root / BRIDGE_SERVICE).exists()
     assert (root / COLLECTOR_SERVICE).exists()
     assert any(cmd[:3] == ["systemd-analyze", "--user", "verify"] for cmd in calls)
-    assert ["systemctl", "--user", "enable", "--now", BRIDGE_SERVICE] in calls
-    assert ["systemctl", "--user", "enable", "--now", COLLECTOR_SERVICE] in calls
+    assert ["systemctl", "--user", "enable", BRIDGE_SERVICE] in calls
+    assert ["systemctl", "--user", "start", BRIDGE_SERVICE] in calls
+    assert ["systemctl", "--user", "enable", COLLECTOR_SERVICE] in calls
+    assert ["systemctl", "--user", "start", COLLECTOR_SERVICE] in calls
 
 
 def test_remove_transport_removes_owned_units(tmp_path):
@@ -224,3 +226,30 @@ def test_wait_bridge_connected_fails_closed(tmp_path):
             health_check=lambda _cfg: "unreachable",
             sleeper=lambda _seconds: None,
         )
+
+
+def test_reinstall_restarts_active_transport_services(tmp_path, monkeypatch):
+    cfg = make_config(tmp_path)
+    home, *_ = make_hermes(tmp_path)
+    root = tmp_path / "systemd"
+    calls = []
+
+    monkeypatch.setattr("whatsapp_digest.transport._wait_bridge_connected", lambda _cfg: None)
+    monkeypatch.setattr("whatsapp_digest.transport._bridge_health", lambda _cfg: "connected")
+
+    def fake(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["systemctl", "--user", "is-active"]:
+            return subprocess.CompletedProcess(cmd, 0, "active\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    install_transport(
+        cfg,
+        unit_dir=root,
+        python_executable="/opt/digest/.venv/bin/python",
+        hermes_home=home,
+        executor=fake,
+    )
+
+    assert ["systemctl", "--user", "restart", BRIDGE_SERVICE] in calls
+    assert ["systemctl", "--user", "restart", COLLECTOR_SERVICE] in calls
