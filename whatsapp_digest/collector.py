@@ -174,7 +174,20 @@ class WhatsAppCollector:
                 if pending is None:
                     pending = self.fetch_messages()
                 if pending:
-                    self.process_batch(pending)
+                    stats = self.process_batch(pending)
+                    logger.info(
+                        "WhatsApp collector batch received=%d stored=%d updated=%d "
+                        "unchanged=%d discovered_groups=%d ignored_direct=%d "
+                        "ignored_media_without_caption=%d invalid=%d",
+                        stats.received,
+                        stats.stored,
+                        stats.updated,
+                        stats.unchanged,
+                        stats.discovered_groups,
+                        stats.ignored_direct,
+                        stats.ignored_media_without_caption,
+                        stats.invalid,
+                    )
                 pending = None
             except BridgeReadError as exc:
                 logger.warning("WhatsApp bridge read failed: %s", exc)

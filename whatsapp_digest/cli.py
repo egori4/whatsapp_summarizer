@@ -12,6 +12,7 @@ from .collector import WhatsAppCollector
 from .delivery.base import DeliveryError
 from .delivery.email import EmailDelivery
 from .logging_setup import setup_logging
+from .locking import WorkflowBusyError, workflow_lock
 from .runner import RunnerError, RunResult, run_workflow
 from .systemd import (
     ScheduleError,
@@ -19,6 +20,12 @@ from .systemd import (
     remove_schedules,
     schedule_env_file,
     schedule_status,
+)
+from .transport import (
+    TransportError,
+    install_transport,
+    remove_transport,
+    transport_status,
 )
 
 
@@ -61,6 +68,12 @@ def _parser() -> argparse.ArgumentParser:
     schedule_sub.add_parser("install")
     schedule_sub.add_parser("status")
     schedule_sub.add_parser("remove")
+
+    transport = sub.add_parser("transport")
+    transport_sub = transport.add_subparsers(dest="transport_command", required=True)
+    transport_sub.add_parser("install")
+    transport_sub.add_parser("status")
+    transport_sub.add_parser("remove")
 
     return parser
 
@@ -134,7 +147,11 @@ def _cmd_collector(path: str, *, once: bool) -> int:
                 f"ignored_direct={stats.ignored_direct}"
             )
             return 0
-        collector.run_forever()
+        try:
+            with workflow_lock(cfg.database_path, "_collector"):
+                collector.run_forever()
+        except WorkflowBusyError as exc:
+            raise RunnerError("WhatsApp collector is already running") from exc
     return 0
 
 
@@ -192,6 +209,45 @@ def _cmd_schedule(path: str, command: str) -> int:
             print(f"Removed: {name}")
     else:
         print("No generated digest schedules found.")
+    return 0
+
+
+def _cmd_transport(path: str, command: str) -> int:
+    cfg = load_config(path)
+    if command == "install":
+        units = install_transport(cfg)
+        print("Bridge service: whatsapp-digest-bridge.service")
+        print(f"  Node: {units.paths.node}")
+        print(f"  Bridge: {units.paths.bridge_script}")
+        print(f"  Session: {units.paths.session_dir}")
+        print(f"  Allowed groups: {','.join(units.allowed_groups)}")
+        print("Collector service: whatsapp-digest-collector.service")
+        state = transport_status(cfg)
+        print(f"Bridge: {state['bridge_active']} ({state['bridge_health']})")
+        print(f"Collector: {state['collector_active']}")
+        print(f"Hermes WhatsApp: {state['hermes_whatsapp']}")
+        print(f"User linger: {state['linger']}")
+        if state["linger"] == "no":
+            print("For startup before login: sudo loginctl enable-linger $USER")
+        return 0
+
+    if command == "status":
+        state = transport_status(cfg)
+        print(f"Hermes WhatsApp: {state['hermes_whatsapp']}")
+        print(f"Bridge enabled: {state['bridge_enabled']}")
+        print(f"Bridge active: {state['bridge_active']}")
+        print(f"Bridge health: {state['bridge_health']}")
+        print(f"Collector enabled: {state['collector_enabled']}")
+        print(f"Collector active: {state['collector_active']}")
+        print(f"User linger: {state['linger']}")
+        return 0
+
+    removed = remove_transport()
+    if removed:
+        for name in removed:
+            print(f"Removed: {name}")
+    else:
+        print("No generated digest transport services found.")
     return 0
 
 
@@ -280,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_email_test(args.config, args.workflow)
         if args.command == "schedule":
             return _cmd_schedule(args.config, args.schedule_command)
+        if args.command == "transport":
+            return _cmd_transport(args.config, args.transport_command)
         if args.command == "run":
             return _cmd_run(
                 args.config,
@@ -289,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 scheduled=args.scheduled,
             )
-    except (ConfigError, RunnerError, DeliveryError, ScheduleError) as exc:
+    except (ConfigError, RunnerError, DeliveryError, ScheduleError, TransportError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:

@@ -1214,9 +1214,30 @@ DoD:
 
 Phase 6 intentionally schedules digest execution only. The standalone upstream WhatsApp bridge and collector lifecycle remain separate transport concerns. Before Phase 7 is called unattended/production-ready, the pilot must explicitly supervise both so collection survives logout/reboot.
 
-### Phase 7 — pilot/acceptance
+### Phase 7 — supervised transport + pilot/acceptance
 
-Validate with real workflows for several days.
+Before the multi-day pilot, make the proven standalone transport unattended:
+
+- keep Hermes gateway available for its other platforms, but require its WhatsApp adapter to remain disabled;
+- install a dedicated `whatsapp-digest-bridge.service` using the upstream Hermes bridge on the configured loopback port;
+- derive `WHATSAPP_GROUP_ALLOWED_USERS` from workflow `group_jid` values and force `WHATSAPP_GROUP_POLICY=allowlist`;
+- never set `WHATSAPP_ALLOWED_USERS=*` for the v2 service;
+- install a read-only `whatsapp-digest-collector.service` that depends on the bridge and uses the project virtualenv;
+- restart bridge/collector on failure;
+- report user-systemd linger state so reboot-before-login behavior is explicit;
+- log collector batch counts only, never WhatsApp source text.
+
+Transport DoD:
+
+- Hermes gateway WhatsApp is disabled and no bridge competes on its old gateway port;
+- dedicated bridge is active/connected on the configured loopback port;
+- collector is active;
+- a real configured-group message becomes a pending SQLite change;
+- unknown DMs remain ignored and configured group admission comes only from the generated allowlist;
+- generated services pass `systemd-analyze verify`;
+- if boot-before-login operation is required, user lingering is enabled.
+
+Then validate real workflows for several days.
 
 Evaluate summary vs raw attachment, focusing on:
 
