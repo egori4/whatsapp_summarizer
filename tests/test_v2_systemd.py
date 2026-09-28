@@ -120,6 +120,8 @@ def test_install_removes_stale_generated_timer(tmp_path):
 
     def fake(cmd, **kwargs):
         calls.append(cmd)
+        if cmd[:3] == ["systemctl", "--user", "is-active"]:
+            return subprocess.CompletedProcess(cmd, 0, "active\n", "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     install_schedules(cfg, unit_dir=unit_dir, executor=fake)
