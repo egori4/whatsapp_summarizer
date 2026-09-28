@@ -127,6 +127,8 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
+`pip install -e .` installs the project in **editable mode**. The virtual environment records this checkout as the installed `whatsapp-tech-digest` package, so `digest` imports Python code directly from the working tree instead of from a copied package. This means switching branches or editing Python source changes what the next `digest` process runs. Re-run `pip install -e .` when dependencies or package metadata/version change, or after recreating the virtual environment.
+
 Validate the code:
 
 ```bash
@@ -684,9 +686,27 @@ If a logical workflow moves to a completely different WhatsApp group, prefer a *
 
 ---
 
-## Updating the application
+## Updating, switching branches, and applying changes
 
-Recommended update procedure:
+The project is installed in editable mode, so source-code changes in the checked-out working tree are picked up by the next `digest` process. You do **not** normally restart long-running services just because runner/model/rendering Python code changed.
+
+### Switch to another branch for testing
+
+```bash
+cd ~/scripts/whatsapp-tech-digest
+git switch <branch>
+git pull
+source .venv/bin/activate
+pip install -e .
+pytest -q tests/test_v2_*.py
+digest --config ./config.yaml config validate
+```
+
+`pip install -e .` is recommended after a branch switch because the branch may change dependencies or package metadata. If only Python source changed, editable mode already points at the working tree, but reinstalling is cheap and removes ambiguity.
+
+After validation, the next manual or scheduled digest run uses the checked-out branch. Switching the production host's checkout therefore effectively changes the application version used by the next scheduled run.
+
+### Pull updates on the current branch
 
 ```bash
 cd ~/scripts/whatsapp-tech-digest
@@ -694,15 +714,61 @@ git pull
 source .venv/bin/activate
 pip install -e .
 pytest -q tests/test_v2_*.py
-
 digest --config ./config.yaml config validate
-digest --config ./config.yaml transport install
-digest --config ./config.yaml schedule install
+```
+
+Then apply only the operational actions required by what changed:
+
+| What changed | Required action |
+| --- | --- |
+| Runner/model/validation/renderer Python code only | No service reinstall; next run uses new code |
+| Python dependencies or package metadata/version | `pip install -e .` |
+| `config.yaml` instructions/model/recipients/context/SMTP values | `digest ... config validate`; future runs read the new values |
+| SMTP password or another variable in `digest.env` | Edit `digest.env`, keep mode `600`; no schedule reinstall is normally required |
+| Workflow schedule | `digest ... schedule install` |
+| Workflow/group JID added, removed, or changed | `digest ... transport install` and `digest ... schedule install` |
+| Transport implementation or generated transport-unit logic | `digest ... transport install` |
+| Generated scheduler/service-unit logic | `digest ... schedule install` |
+| Virtual environment recreated | `pip install -e .` |
+
+Useful post-update checks:
+
+```bash
 digest --config ./config.yaml transport status
 digest --config ./config.yaml schedule status
 ```
 
-Re-running `transport install` is safe: it rewrites the managed units, restarts an already-running managed bridge/collector so new settings take effect, waits for the bridge to reconnect, and verifies health.
+Do not routinely reinstall transport or schedules after every code pull. Reinstall only when the relevant generated units, group allowlist, or schedule configuration changed.
+
+### Environment variables
+
+Scheduled services load project-level secrets from `digest.env`. For example:
+
+```text
+WHATSAPP_DIGEST_SMTP_PASSWORD=...
+```
+
+After changing `digest.env`:
+
+```bash
+chmod 600 digest.env
+```
+
+The next newly started scheduled digest process reads the updated file. Manual commands still require the same variable in the current shell environment when SMTP authentication is needed.
+
+### Roll back to production `main`
+
+```bash
+cd ~/scripts/whatsapp-tech-digest
+git switch main
+git pull
+source .venv/bin/activate
+pip install -e .
+pytest -q tests/test_v2_*.py
+digest --config ./config.yaml config validate
+```
+
+As above, reinstall transport or schedules only if the target branch changes those operational definitions.
 
 ---
 
