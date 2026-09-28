@@ -72,3 +72,15 @@ No new storage is introduced. Context reads the existing retained SQLite message
 6. Raw QA artifact separates current and historical records.
 7. Existing transport, scheduler, SMTP, retention and security tests remain green.
 8. Branch is pushed for review before merge/tagging v2.1.0.
+
+## Configuration upgrade compatibility
+
+New optional configuration remains backward-compatible at runtime. v2.1 introduces a lightweight explicit config-upgrade path rather than silently rewriting production YAML:
+
+```bash
+digest --config ./config.yaml config validate
+digest --config ./config.yaml config upgrade
+digest --config ./config.yaml config upgrade --apply
+```
+
+`config validate` reports optional defaults missing from the physical file. `config upgrade` writes a reviewable `.upgraded` copy; `--apply` validates it, backs up the active config, then replaces it. The merge is recursive and add-missing-only, so existing user values always win. Normal digest execution never mutates configuration.

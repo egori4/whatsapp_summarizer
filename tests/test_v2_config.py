@@ -214,3 +214,50 @@ def test_context_lookback_cannot_exceed_retention(tmp_path):
     )
     with pytest.raises(ConfigError, match="exceeds retention"):
         load_config(write_config(tmp_path, body))
+
+
+def test_missing_config_defaults_reports_context_keys(tmp_path):
+    from whatsapp_digest.config import missing_config_defaults
+    path = write_config(tmp_path)
+    assert missing_config_defaults(path) == (
+        'context.enabled', 'context.lookback', 'context.max_messages'
+    )
+
+
+def test_config_upgrade_writes_review_file_and_preserves_existing_values(tmp_path):
+    import stat
+    import yaml
+    from whatsapp_digest.config import upgrade_config
+    body = BASE.replace(
+        'defaults:\n  timezone: America/Toronto',
+        'context:\n  lookback: 24h\ndefaults:\n  timezone: America/Toronto',
+    )
+    path = write_config(tmp_path, body)
+    original = path.read_text()
+    path.chmod(0o600)
+    result = upgrade_config(path)
+    assert result.applied is False
+    assert result.output_path == path.with_name('config.yaml.upgraded')
+    assert result.backup_path is None
+    assert result.added == ('context.enabled', 'context.max_messages')
+    upgraded = yaml.safe_load(result.output_path.read_text())
+    assert upgraded['context'] == {'lookback': '24h', 'enabled': True, 'max_messages': 100}
+    assert stat.S_IMODE(result.output_path.stat().st_mode) == 0o600
+    assert path.read_text() == original
+
+
+def test_config_upgrade_apply_backs_up_and_is_idempotent(tmp_path):
+    import yaml
+    from whatsapp_digest.config import upgrade_config, missing_config_defaults
+    path = write_config(tmp_path)
+    original = path.read_text()
+    result = upgrade_config(path, apply=True)
+    assert result.applied is True
+    assert result.backup_path is not None
+    assert result.backup_path.read_text() == original
+    upgraded = yaml.safe_load(path.read_text())
+    assert upgraded['context'] == {'enabled': True, 'lookback': '48h', 'max_messages': 100}
+    assert missing_config_defaults(path) == ()
+    again = upgrade_config(path, apply=True)
+    assert again.added == ()
+    assert again.backup_path is None

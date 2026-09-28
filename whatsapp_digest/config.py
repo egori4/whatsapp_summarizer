@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import copy
+import os
 import re
+import shutil
 from string import Formatter
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,9 +23,104 @@ _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SUBJECT_FIELDS = {"date", "workflow_name", "workflow_id", "run_id"}
 _DURATION_RE = re.compile(r"^(\d+)([mhd])$", re.IGNORECASE)
 
+OPTIONAL_CONFIG_DEFAULTS: dict[str, Any] = {
+    "context": {
+        "enabled": True,
+        "lookback": "48h",
+        "max_messages": 100,
+    },
+}
+
 
 class ConfigError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ConfigUpgradeResult:
+    source_path: Path
+    output_path: Path | None
+    backup_path: Path | None
+    added: tuple[str, ...]
+    applied: bool
+
+
+def _read_raw_config(path: str | Path) -> tuple[Path, dict[str, Any]]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise ConfigError(f"config file not found: {source}")
+    try:
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"invalid YAML: {exc}") from exc
+    return source, _mapping(raw, "config")
+
+
+def _merge_missing_defaults(
+    target: dict[str, Any],
+    defaults: dict[str, Any],
+    *,
+    prefix: str = "",
+    added: list[str] | None = None,
+) -> list[str]:
+    result = added if added is not None else []
+    for key, default in defaults.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if key not in target:
+            target[key] = copy.deepcopy(default)
+            if isinstance(default, dict):
+                result.extend(f"{path}.{child}" for child in default)
+            else:
+                result.append(path)
+            continue
+        if isinstance(default, dict) and isinstance(target[key], dict):
+            _merge_missing_defaults(target[key], default, prefix=path, added=result)
+    return result
+
+
+def missing_config_defaults(path: str | Path) -> tuple[str, ...]:
+    _source, root = _read_raw_config(path)
+    probe = copy.deepcopy(root)
+    return tuple(_merge_missing_defaults(probe, OPTIONAL_CONFIG_DEFAULTS))
+
+
+def _next_backup_path(source: Path) -> Path:
+    candidate = source.with_name(source.name + ".bak")
+    if not candidate.exists():
+        return candidate
+    index = 1
+    while True:
+        candidate = source.with_name(source.name + f".bak.{index}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def upgrade_config(path: str | Path, *, apply: bool = False) -> ConfigUpgradeResult:
+    # Validate the existing file first; older configs remain valid through runtime defaults.
+    load_config(path)
+    source, root = _read_raw_config(path)
+    upgraded = copy.deepcopy(root)
+    added = tuple(_merge_missing_defaults(upgraded, OPTIONAL_CONFIG_DEFAULTS))
+    if not added:
+        return ConfigUpgradeResult(source, None, None, (), apply)
+
+    output = source.with_name(source.name + ".upgraded")
+    output.write_text(
+        yaml.safe_dump(upgraded, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    os.chmod(output, source.stat().st_mode & 0o777)
+    # Validate the generated candidate before it can replace the active configuration.
+    load_config(output)
+
+    if not apply:
+        return ConfigUpgradeResult(source, output, None, added, False)
+
+    backup = _next_backup_path(source)
+    shutil.copy2(source, backup)
+    os.replace(output, source)
+    return ConfigUpgradeResult(source, source, backup, added, True)
 
 
 @dataclass(frozen=True)
@@ -231,12 +329,13 @@ def load_config(path: str | Path) -> AppConfig:
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timezone = _timezone(defaults.get("timezone", "America/Toronto"), "defaults.timezone")
 
+    context_defaults = OPTIONAL_CONFIG_DEFAULTS["context"]
     context_raw = _mapping(root.get("context", {}), "context")
-    context_enabled = context_raw.get("enabled", True)
+    context_enabled = context_raw.get("enabled", context_defaults["enabled"])
     if not isinstance(context_enabled, bool):
         raise ConfigError("context.enabled must be boolean")
-    context_lookback, context_seconds = _duration_seconds(context_raw.get("lookback", "48h"), "context.lookback")
-    context_max_messages = context_raw.get("max_messages", 100)
+    context_lookback, context_seconds = _duration_seconds(context_raw.get("lookback", context_defaults["lookback"]), "context.lookback")
+    context_max_messages = context_raw.get("max_messages", context_defaults["max_messages"])
     if not isinstance(context_max_messages, int) or isinstance(context_max_messages, bool) or not 1 <= context_max_messages <= 1000:
         raise ConfigError("context.max_messages must be an integer from 1 to 1000")
     if context_enabled and context_seconds > processed_raw_days * 86400:

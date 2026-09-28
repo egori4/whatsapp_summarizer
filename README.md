@@ -149,6 +149,20 @@ Validate it:
 digest --config ./config.yaml config validate
 ```
 
+Older valid configs continue to run with built-in defaults for newly introduced optional settings. If validation reports optional defaults that are not explicitly present, generate a reviewable upgraded copy:
+
+```bash
+digest --config ./config.yaml config upgrade
+```
+
+This writes `config.yaml.upgraded` and never modifies the active file. Existing values always win; only missing known defaults are added. Review the generated file, then apply deliberately with:
+
+```bash
+digest --config ./config.yaml config upgrade --apply
+```
+
+`--apply` validates the generated configuration, creates a numbered backup such as `config.yaml.bak` / `config.yaml.bak.1`, and then replaces the active file. Re-running upgrade after all defaults are present is a no-op. Because PyYAML writes the upgraded copy, comments and hand formatting may be normalized even though configuration values are preserved.
+
 ### 4. Disable WhatsApp inside the normal Hermes gateway
 
 The v2 project owns the dedicated WhatsApp bridge. The normal Hermes gateway must not also start a WhatsApp bridge.
@@ -652,6 +666,18 @@ Normal v2 deployment:
 
 ## Changing configuration
 
+### Config schema upgrades
+
+Application releases may introduce new optional configuration keys. Runtime loading remains backward-compatible by applying safe internal defaults, while `config validate` reports defaults that are not explicitly present in the file.
+
+Use:
+
+```bash
+digest --config ./config.yaml config upgrade
+```
+
+to create a non-destructive `config.yaml.upgraded` review file. Use `--apply` only after review. The upgrader is **add-missing-only**: it never replaces an existing user value.
+
 ### Change instructions/model/recipients
 
 Edit `config.yaml`, validate it, and future runs will read the new values:
@@ -700,6 +726,8 @@ source .venv/bin/activate
 pip install -e .
 pytest -q tests/test_v2_*.py
 digest --config ./config.yaml config validate
+# If optional defaults are reported:
+digest --config ./config.yaml config upgrade
 ```
 
 `pip install -e .` is recommended after a branch switch because the branch may change dependencies or package metadata. If only Python source changed, editable mode already points at the working tree, but reinstalling is cheap and removes ambiguity.
@@ -715,6 +743,8 @@ source .venv/bin/activate
 pip install -e .
 pytest -q tests/test_v2_*.py
 digest --config ./config.yaml config validate
+# If optional defaults are reported:
+digest --config ./config.yaml config upgrade
 ```
 
 Then apply only the operational actions required by what changed:
