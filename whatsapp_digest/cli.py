@@ -182,6 +182,8 @@ def _cmd_schedule(path: str, command: str) -> int:
             print(f"  Schedule: {item['schedule']}")
             print(f"  Enabled: {item['enabled']}")
             print(f"  Active: {item['active']}")
+            print(f"  Next: {item['next']}")
+            print(f"  Health: {item['health']}")
         return 0
 
     removed = remove_schedules(cfg)
