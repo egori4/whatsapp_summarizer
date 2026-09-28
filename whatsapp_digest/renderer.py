@@ -20,6 +20,8 @@ class RenderContext:
     message_count: int
     window_start: str | None
     window_end: str | None
+    context_count: int = 0
+    context_lookback: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,7 @@ def _metadata_lines(context: RenderContext) -> list[str]:
         f"Model: {context.model}",
         f"Reasoning: {context.reasoning}",
         f"Messages processed: {context.message_count}",
+        f"Context: {context.context_count} prior messages ({context.context_lookback} lookback)" if context.context_lookback else "Context: disabled",
         f"Window: {window}",
         f"Run ID: {context.run_id}",
     ]

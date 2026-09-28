@@ -57,7 +57,13 @@ def _parse(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def validate_digest(raw: str, workflow: WorkflowConfig, source_rows: list[Any]) -> dict[str, Any]:
+def validate_digest(
+    raw: str,
+    workflow: WorkflowConfig,
+    source_rows: list[Any],
+    *,
+    context_rows: list[Any] | None = None,
+) -> dict[str, Any]:
     parsed = _parse(raw)
     raw_sections = parsed.get("sections")
     if not isinstance(raw_sections, list):
@@ -65,11 +71,14 @@ def validate_digest(raw: str, workflow: WorkflowConfig, source_rows: list[Any]) 
     if len(raw_sections) > 30:
         raise DigestValidationError("sections exceeds 30 entries")
 
-    source_by_id = {str(row["message_id"]): row for row in source_rows}
+    context_rows = context_rows or []
+    all_rows = [*context_rows, *source_rows]
+    source_by_id = {str(row["message_id"]): row for row in all_rows}
     allowed_ids = set(source_by_id)
+    current_ids = {str(row["message_id"]) for row in source_rows}
     allowed_names = {
         name
-        for row in source_rows
+        for row in all_rows
         if (name := safe_display_name(row["display_name"])) != "Unknown participant"
     }
     configured_sections = {section.id: section for section in workflow.sections}
@@ -106,6 +115,9 @@ def validate_digest(raw: str, workflow: WorkflowConfig, source_rows: list[Any]) 
             unknown = [source_id for source_id in source_ids if source_id not in allowed_ids]
             if unknown:
                 raise DigestValidationError(f"{item_name}.source_ids references unknown source: {unknown[0]}")
+
+            if not any(source_id in current_ids for source_id in source_ids):
+                raise DigestValidationError(f"{item_name}.source_ids must reference at least one current source")
 
             reported_by = _string_list(item_value.get("reported_by"), f"{item_name}.reported_by", max_items=20, max_chars=120)
             contributors = _string_list(item_value.get("contributors"), f"{item_name}.contributors", max_items=30, max_chars=120)

@@ -8,7 +8,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.0.0  
+**Version:** 2.1.0
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
@@ -115,7 +115,7 @@ After pairing, disable WhatsApp in the normal Hermes gateway as described below.
 ```bash
 git clone https://github.com/egori4/whatsapp_summarizer.git
 cd whatsapp_summarizer
-git checkout v2-workflow-rebuild
+git checkout main
 ```
 
 ### 2. Create the virtual environment
@@ -489,6 +489,19 @@ schedule:
 The workflow timezone defaults to `defaults.timezone` and may be overridden in the workflow schedule.
 
 Omit `schedule` for manual-only workflows.
+
+### Historical context
+
+By default, normal checkpoint-driven runs include up to 48 hours of already processed messages as read-only context:
+
+```yaml
+context:
+  enabled: true
+  lookback: 48h
+  max_messages: 100
+```
+
+Historical context helps resolve continuations and short replies across digest boundaries. It never drives checkpointing and every emitted digest item must cite at least one current message. Set `enabled: false` to disable it. The lookback cannot exceed `retention.processed_raw_days`. Explicit `--last`/`--since` runs do not add extra historical context.
 
 ### Summarization
 

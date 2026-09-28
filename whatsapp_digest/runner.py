@@ -224,11 +224,25 @@ def _run_workflow_unlocked(
             )
         )
         window_start, window_end = _window(usable)
+        context_rows: list[Any] = []
+        context_lookback: str | None = None
+        if initialized and explicit_since is None and config.context["enabled"] and usable:
+            context_start = current - timedelta(seconds=int(config.context["lookback_seconds"]))
+            context_rows = db.select_context(
+                workflow.group_jid,
+                checkpoint,
+                context_start.isoformat(),
+                int(config.context["max_messages"]),
+            )
+            context_lookback = str(config.context["lookback"])
+
         logger.info(
-            "[%s] selected_messages=%d pending_changes=%d",
+            "[%s] selected_messages=%d pending_changes=%d context_messages=%d context_lookback=%s",
             workflow.id,
             len(usable),
             len(rows),
+            len(context_rows),
+            context_lookback or "disabled",
         )
 
         db.create_run(
@@ -278,7 +292,9 @@ def _run_workflow_unlocked(
 
         model_gateway = gateway or HermesModelGateway(config)
         try:
-            model_result: ModelInvocationResult = model_gateway.summarize(workflow, usable)
+            model_result: ModelInvocationResult = model_gateway.summarize(
+                workflow, usable, context_rows=context_rows
+            )
         except HermesGatewayError as exc:
             reason = str(exc)
             db.finish_run(
@@ -302,8 +318,23 @@ def _run_workflow_unlocked(
             model_result.reasoning,
         )
 
+        if model_result.context_source_records is None:
+            used_context_rows = context_rows
+            used_context_records = tuple(source_record(row) for row in context_rows)
+        else:
+            used_context_records = model_result.context_source_records
+            used_context_ids = {record["source_id"] for record in used_context_records}
+            used_context_rows = [row for row in context_rows if str(row["message_id"]) in used_context_ids]
+        if len(used_context_rows) != len(context_rows):
+            logger.info(
+                "[%s] context trimmed candidates=%d used=%d",
+                workflow.id, len(context_rows), len(used_context_rows),
+            )
+
         try:
-            digest = validate_digest(model_result.raw_output, workflow, usable)
+            digest = validate_digest(
+                model_result.raw_output, workflow, usable, context_rows=used_context_rows
+            )
         except DigestValidationError as exc:
             reason = str(exc)
             db.finish_run(
@@ -336,11 +367,15 @@ def _run_workflow_unlocked(
             message_count=len(usable),
             window_start=window_start,
             window_end=window_end,
+            context_count=len(used_context_rows),
+            context_lookback=context_lookback,
         )
         try:
             rendered = render_digest(digest, render_context)
             model_records = model_result.source_records or tuple(source_record(row) for row in usable)
-            raw_text = render_raw_messages(model_records, render_context)
+            raw_text = render_raw_messages(
+                model_records, render_context, context_records=used_context_records
+            )
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
             db.finish_run(
@@ -384,7 +419,7 @@ def _run_workflow_unlocked(
                 raw_text=raw_text,
             )
 
-        if not db.sources_are_fresh(usable):
+        if not db.sources_are_fresh([*usable, *used_context_rows]):
             reason = "one or more selected source messages changed after the run snapshot"
             db.finish_run(
                 run_id,

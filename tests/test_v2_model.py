@@ -10,6 +10,7 @@ from whatsapp_digest.model.hermes import (
     BASE_SYSTEM_PROMPT,
     HermesModelGateway,
     build_user_prompt,
+    fit_prompt_context,
     safe_display_name,
 )
 from whatsapp_digest.model.hermes_worker import build_agent_kwargs, resolve_model_settings
@@ -148,3 +149,26 @@ def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_pat
     assert all(malicious not in part for part in seen["cmd"])
     assert seen["request"]["model"]["provider"] == "inherit"
     assert seen["mode"] & 0o077 == 0
+
+
+def test_prompt_separates_historical_context_from_current_messages():
+    current = [{"source_id": "new", "timestamp": "2026-09-28T12:51:00+00:00", "sender": "David", "text": "Yes!"}]
+    history = [{"source_id": "old", "timestamp": "2026-09-28T12:50:00+00:00", "sender": "Nicola", "text": "Move to 35.0.2?"}]
+    prompt = build_user_prompt(workflow(), current, history)
+    assert "HISTORICAL CONTEXT" in prompt
+    assert "CURRENT MESSAGES" in prompt
+    assert "ALREADY PROCESSED" in prompt
+    assert "old" in prompt and "new" in prompt
+
+
+def test_prompt_budget_drops_oldest_context_before_current(monkeypatch):
+    import whatsapp_digest.model.hermes as hermes
+    monkeypatch.setattr(hermes, "MAX_PROMPT_CHARS", 1500)
+    current = [{"source_id": "new", "timestamp": "t", "sender": "David", "text": "CURRENT-KEEP"}]
+    history = [
+        {"source_id": "old1", "timestamp": "t", "sender": "A", "text": "x" * 900},
+        {"source_id": "old2", "timestamp": "t", "sender": "B", "text": "recent"},
+    ]
+    prompt, used = fit_prompt_context(workflow(), current, history)
+    assert "CURRENT-KEEP" in prompt
+    assert [row["source_id"] for row in used] == ["old2"]

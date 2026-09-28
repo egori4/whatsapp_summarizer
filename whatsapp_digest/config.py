@@ -18,6 +18,7 @@ _DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 _REASONING = {"inherit", "none", "minimal", "low", "medium", "high", "xhigh"}
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SUBJECT_FIELDS = {"date", "workflow_name", "workflow_id", "run_id"}
+_DURATION_RE = re.compile(r"^(\d+)([mhd])$", re.IGNORECASE)
 
 
 class ConfigError(ValueError):
@@ -55,6 +56,7 @@ class AppConfig:
     whatsapp: dict[str, Any]
     email: dict[str, Any]
     default_timezone: str
+    context: dict[str, Any]
     workflows: tuple[WorkflowConfig, ...] = field(default_factory=tuple)
 
     def workflow(self, workflow_id: str) -> WorkflowConfig:
@@ -130,6 +132,16 @@ def _validate_emails(values: Any, name: str, *, required: bool) -> list[str]:
             raise ConfigError(f"{name}[{index}] is not a valid email address")
         result.append(email)
     return result
+
+
+def _duration_seconds(value: Any, name: str) -> tuple[str, int]:
+    raw = _nonempty(value, name).lower()
+    match = _DURATION_RE.fullmatch(raw)
+    if not match or int(match.group(1)) <= 0:
+        raise ConfigError(f"{name} must use a positive duration such as 24h, 48h, or 3d")
+    amount = int(match.group(1))
+    seconds = amount * {"m": 60, "h": 3600, "d": 86400}[match.group(2).lower()]
+    return raw, seconds
 
 
 def _validate_subject_template(value: Any, name: str) -> str:
@@ -219,6 +231,25 @@ def load_config(path: str | Path) -> AppConfig:
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timezone = _timezone(defaults.get("timezone", "America/Toronto"), "defaults.timezone")
 
+    context_raw = _mapping(root.get("context", {}), "context")
+    context_enabled = context_raw.get("enabled", True)
+    if not isinstance(context_enabled, bool):
+        raise ConfigError("context.enabled must be boolean")
+    context_lookback, context_seconds = _duration_seconds(context_raw.get("lookback", "48h"), "context.lookback")
+    context_max_messages = context_raw.get("max_messages", 100)
+    if not isinstance(context_max_messages, int) or isinstance(context_max_messages, bool) or not 1 <= context_max_messages <= 1000:
+        raise ConfigError("context.max_messages must be an integer from 1 to 1000")
+    if context_enabled and context_seconds > processed_raw_days * 86400:
+        raise ConfigError(
+            f"context.lookback ({context_lookback}) exceeds retention.processed_raw_days ({processed_raw_days}d)"
+        )
+    context = {
+        "enabled": context_enabled,
+        "lookback": context_lookback,
+        "lookback_seconds": context_seconds,
+        "max_messages": context_max_messages,
+    }
+
     workflows_raw = root.get("workflows")
     if not isinstance(workflows_raw, list) or not workflows_raw:
         raise ConfigError("workflows must be a non-empty list")
@@ -297,4 +328,4 @@ def load_config(path: str | Path) -> AppConfig:
             email={"to": to, "cc": cc, "attach_raw_messages": attach_raw, "subject": subject},
         ))
 
-    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, tuple(workflows))
+    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows))

@@ -184,3 +184,33 @@ def test_unsafe_workflow_id_rejected(tmp_path, workflow_id):
     body = BASE.replace("id: global-ps", f"id: {workflow_id}")
     with pytest.raises(ConfigError, match="letters, numbers"):
         load_config(write_config(tmp_path, body))
+
+
+def test_context_defaults_enabled_48h(tmp_path):
+    cfg = load_config(write_config(tmp_path))
+    assert cfg.context == {
+        "enabled": True,
+        "lookback": "48h",
+        "lookback_seconds": 48 * 3600,
+        "max_messages": 100,
+    }
+
+
+def test_context_can_be_disabled_and_customized(tmp_path):
+    body = BASE.replace(
+        "defaults:\n  timezone: America/Toronto",
+        "context:\n  enabled: false\n  lookback: 3d\n  max_messages: 150\ndefaults:\n  timezone: America/Toronto",
+    )
+    cfg = load_config(write_config(tmp_path, body))
+    assert cfg.context["enabled"] is False
+    assert cfg.context["lookback"] == "3d"
+    assert cfg.context["max_messages"] == 150
+
+
+def test_context_lookback_cannot_exceed_retention(tmp_path):
+    body = BASE.replace(
+        "defaults:\n  timezone: America/Toronto",
+        "context:\n  enabled: true\n  lookback: 8d\ndefaults:\n  timezone: America/Toronto",
+    )
+    with pytest.raises(ConfigError, match="exceeds retention"):
+        load_config(write_config(tmp_path, body))

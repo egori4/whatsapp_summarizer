@@ -6,6 +6,11 @@ retention:
   processed_raw_days: 7
   log_days: 30
 
+context:
+  enabled: true
+  lookback: 48h
+  max_messages: 100
+
 hermes:
   command: hermes
   timeout_seconds: 600

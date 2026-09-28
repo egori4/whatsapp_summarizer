@@ -270,6 +270,20 @@ class DigestDatabase:
             (group_jid, since_utc, cutoff_seq),
         ))
 
+    def select_context(self, group_jid: str, through_seq: int, since_utc: str, limit: int) -> list[sqlite3.Row]:
+        rows = list(self._conn.execute(
+            """
+            SELECT * FROM messages
+            WHERE group_jid=? AND change_seq<=? AND occurred_at>=?
+              AND deleted=0 AND TRIM(COALESCE(NULLIF(text, ''), caption, ''))<>''
+            ORDER BY occurred_at DESC, change_seq DESC, message_id DESC
+            LIMIT ?
+            """,
+            (group_jid, through_seq, since_utc, limit),
+        ))
+        rows.reverse()
+        return rows
+
     def get_messages(self, message_ids: list[str]) -> list[sqlite3.Row]:
         if not message_ids:
             return []

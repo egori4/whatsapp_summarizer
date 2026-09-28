@@ -113,3 +113,29 @@ def test_unconfigured_sections_may_be_model_created():
 def test_single_json_code_fence_is_tolerated():
     raw = "```json\n" + json.dumps(valid_payload()) + "\n```"
     assert validate_digest(raw, workflow(), SOURCES)["sections"]
+
+
+def test_context_source_may_support_item_when_current_source_is_also_cited():
+    context = [{
+        "message_id": "old1", "occurred_at": "2026-09-26T12:00:00+00:00",
+        "display_name": "Nicola", "text": "Move 5400S to 35.0.2?", "caption": None,
+    }]
+    payload = valid_payload()
+    payload["sections"][0]["items"][0]["source_ids"] = ["old1", "m2"]
+    payload["sections"][0]["items"][0]["references"] = []
+    result = validate_digest(json.dumps(payload), workflow(), SOURCES, context_rows=context)
+    assert result["sections"]
+
+
+def test_context_only_item_is_rejected():
+    context = [{
+        "message_id": "old1", "occurred_at": "2026-09-26T12:00:00+00:00",
+        "display_name": "Nicola", "text": "Move 5400S to 35.0.2?", "caption": None,
+    }]
+    payload = valid_payload()
+    payload["sections"][0]["items"][0]["source_ids"] = ["old1"]
+    payload["sections"][0]["items"][0]["reported_by"] = []
+    payload["sections"][0]["items"][0]["contributors"] = []
+    payload["sections"][0]["items"][0]["references"] = []
+    with pytest.raises(DigestValidationError, match="current source"):
+        validate_digest(json.dumps(payload), workflow(), SOURCES, context_rows=context)

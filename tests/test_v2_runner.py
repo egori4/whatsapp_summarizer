@@ -85,8 +85,8 @@ class FakeGateway:
         self.output = output
         self.calls = []
 
-    def summarize(self, workflow, rows):
-        self.calls.append((workflow, list(rows)))
+    def summarize(self, workflow, rows, *, context_rows=None):
+        self.calls.append((workflow, list(rows), list(context_rows or [])))
         return ModelInvocationResult(
             raw_output=self.output,
             provider="openai-codex",
@@ -96,7 +96,7 @@ class FakeGateway:
 
 
 class FailingGateway:
-    def summarize(self, workflow, rows):
+    def summarize(self, workflow, rows, *, context_rows=None):
         raise HermesGatewayError("simulated provider failure")
 
 
@@ -273,8 +273,8 @@ def test_freshness_change_blocks_delivery_and_checkpoint(tmp_path):
         seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
 
     class MutatingGateway(FakeGateway):
-        def summarize(self, workflow, rows):
-            result = super().summarize(workflow, rows)
+        def summarize(self, workflow, rows, *, context_rows=None):
+            result = super().summarize(workflow, rows, context_rows=context_rows)
             with DigestDatabase(cfg.database_path) as other:
                 other.upsert_message(
                     message_id="m1",
@@ -308,7 +308,7 @@ def test_raw_export_uses_gateway_source_records_not_reread_database(tmp_path):
         seed(db, "m1", "2026-09-27T14:00:00+00:00", "Database text")
 
     class ExactGateway:
-        def summarize(self, workflow, rows):
+        def summarize(self, workflow, rows, *, context_rows=None):
             return ModelInvocationResult(
                 raw_output='{"sections":[]}',
                 provider="openai-codex",
@@ -429,3 +429,35 @@ def test_successful_real_run_applies_processed_message_retention(tmp_path):
     assert result.status == "success-no-pending"
     with DigestDatabase(cfg.database_path) as db:
         assert db.get_messages(["old"]) == []
+
+
+def test_initialized_run_supplies_recent_processed_context_without_counting_it(tmp_path):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        old_seq = seed(db, "old1", "2026-09-27T13:00:00+00:00", "Move the 5400S to 35.0.2?")
+        db.set_checkpoint("tests", old_seq, run_id="previous")
+        seed(db, "m2", "2026-09-27T14:00:00+00:00", "Yes!")
+
+    output = (
+        '{"sections":[{"section_id":"technical","title":"Technical Updates","items":['
+        '{"title":"5400S version confirmed","summary":"Move to 35.0.2.","details":[],"actions":[],"questions":[],'
+        '"reported_by":[],"contributors":[],"references":[],"source_ids":["old1","m2"]}]}]}'
+    )
+    gateway = FakeGateway(output)
+    result = run_workflow(cfg, "tests", dry_run=True, now=NOW, gateway=gateway)
+    assert result.message_count == 1
+    assert [row["message_id"] for row in gateway.calls[0][1]] == ["m2"]
+    assert [row["message_id"] for row in gateway.calls[0][2]] == ["old1"]
+    assert "Context: 1 prior messages (48h lookback)" in result.rendered_text
+    assert "HISTORICAL CONTEXT" in result.raw_text
+
+
+def test_explicit_window_does_not_add_checkpoint_context(tmp_path):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        old_seq = seed(db, "old1", "2026-09-27T13:00:00+00:00", "Old")
+        db.set_checkpoint("tests", old_seq, run_id="previous")
+        seed(db, "m2", "2026-09-27T14:00:00+00:00", "New")
+    gateway = FakeGateway()
+    run_workflow(cfg, "tests", last="2h", dry_run=True, now=NOW, gateway=gateway)
+    assert gateway.calls[0][2] == []
