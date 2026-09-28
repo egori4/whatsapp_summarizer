@@ -119,6 +119,22 @@ def _notify_failure(
         pass
 
 
+def _apply_retention(db: DigestDatabase, config: AppConfig) -> None:
+    try:
+        removed = db.purge_processed_messages(
+            {workflow.id: workflow.group_jid for workflow in config.workflows},
+            config.processed_raw_days,
+        )
+    except Exception as exc:
+        logger.warning(
+            "processed-message retention failed: %s",
+            type(exc).__name__,
+        )
+        return
+    if removed:
+        logger.info("processed-message retention removed=%d", removed)
+
+
 def _run_workflow_unlocked(
     config: AppConfig,
     workflow_id: str,
@@ -200,6 +216,13 @@ def _run_workflow_unlocked(
             row for row in rows
             if not row["deleted"] and bool((row["text"] or row["caption"] or "").strip())
         ]
+        usable.sort(
+            key=lambda row: (
+                str(row["occurred_at"]),
+                int(row["change_seq"]),
+                str(row["message_id"]),
+            )
+        )
         window_start, window_end = _window(usable)
         logger.info(
             "[%s] selected_messages=%d pending_changes=%d",
@@ -228,6 +251,7 @@ def _run_workflow_unlocked(
                     cutoff,
                     status="success-no-pending",
                 )
+                _apply_retention(db, config)
                 status = "success-no-pending"
             return RunResult(
                 run_id, workflow.id, status, 0, cutoff,
@@ -245,6 +269,7 @@ def _run_workflow_unlocked(
                     cutoff,
                     status="success-no-usable",
                 )
+                _apply_retention(db, config)
                 status = "success-no-usable"
             return RunResult(
                 run_id, workflow.id, status, 0, cutoff,
@@ -386,6 +411,7 @@ def _run_workflow_unlocked(
                 model=model_result.model,
                 reasoning=model_result.reasoning,
             )
+            _apply_retention(db, config)
             return RunResult(
                 run_id=run_id,
                 workflow_id=workflow.id,
@@ -440,6 +466,7 @@ def _run_workflow_unlocked(
             run_id,
             cutoff,
         )
+        _apply_retention(db, config)
         return RunResult(
             run_id=run_id,
             workflow_id=workflow.id,

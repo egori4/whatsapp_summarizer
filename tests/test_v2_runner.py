@@ -380,3 +380,52 @@ def test_runner_blocks_concurrent_same_workflow(tmp_path):
                 gateway=FakeGateway(),
                 delivery=FakeDelivery(),
             )
+
+
+def test_model_receives_messages_in_chronological_order(tmp_path):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "later", "2026-09-27T14:10:00+00:00", "Later")
+        seed(db, "earlier", "2026-09-27T14:00:00+00:00", "Earlier")
+
+    gateway = FakeGateway()
+    run_workflow(
+        cfg,
+        "tests",
+        last="24h",
+        dry_run=True,
+        now=NOW,
+        gateway=gateway,
+    )
+
+    assert [row["message_id"] for row in gateway.calls[0][1]] == ["earlier", "later"]
+
+
+def test_successful_real_run_applies_processed_message_retention(tmp_path):
+    cfg = make_config(tmp_path)
+    old_time = "2026-08-01T12:00:00+00:00"
+    with DigestDatabase(cfg.database_path) as db:
+        db.upsert_message(
+            message_id="old",
+            group_jid="120363429012626317@g.us",
+            sender_id=None,
+            display_name="Rahul",
+            occurred_at=old_time,
+            text="Old collected message",
+            changed_at=old_time,
+            collected_at=old_time,
+        )
+
+    result = run_workflow(
+        cfg,
+        "tests",
+        last="1h",
+        dry_run=False,
+        now=NOW,
+        gateway=FakeGateway(),
+        delivery=FakeDelivery(),
+    )
+
+    assert result.status == "success-no-pending"
+    with DigestDatabase(cfg.database_path) as db:
+        assert db.get_messages(["old"]) == []

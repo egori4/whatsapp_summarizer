@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whatsapp-tech-digest"
-version = "1.2.0"
-description = "Offline, fail-closed WhatsApp TechTeam digest reference implementation"
+version = "2.0.0"
+description = "Read-only WhatsApp group collector and scheduled technical digest pipeline"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0"]
 
 [project.scripts]
 digest = "whatsapp_digest.cli:main"
 
-[tool.setuptools]
-packages = ["whatsapp_digest"]
+[tool.setuptools.packages.find]
+include = ["whatsapp_digest*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

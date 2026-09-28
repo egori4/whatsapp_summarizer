@@ -1,300 +1,884 @@
-# WhatsApp Tech Digest
+# WhatsApp Technical Digest v2
 
-A safety-gated collector and technical-digest pipeline for one explicitly approved WhatsApp group. It is **not** a conversational WhatsApp bot.
+A read-only WhatsApp group collector and scheduled AI digest pipeline.
 
-## Current status
+It continuously collects messages from explicitly configured WhatsApp groups, stores them temporarily in SQLite, summarizes pending messages with Hermes, validates the model output, emails the digest, and advances a per-workflow checkpoint only after a successful outcome.
 
-**Read [`HANDOFF.md`](HANDOFF.md) and [`AGENTS.md`](AGENTS.md) before making changes.** This public repository intentionally contains only sanitized source, tests, and examples; live target identity, runtime state, and operational evidence remain owner-only and Git-ignored.
+It is **not** a conversational WhatsApp bot and it never sends messages back to WhatsApp.
 
-The source includes both the compact one-pass Hermes digest and the Conditional Phase C ephemeral extractor/reconciler candidate. The published artifact is not a deployment: policy installation, candidate qualification, service activation, scheduling, model execution, and delivery remain separate operator-controlled actions.
+## Status
 
-Before publishing or deploying any change:
+**Version:** 2.0.0  
+**Runtime:** Linux + systemd user services  
+**Python:** 3.11+  
+**Model gateway:** Hermes  
+**WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
+**Delivery:** SMTP email
 
-- run the full test suite and `git diff --check`;
-- confirm no policy, group directory, spool, rendered artifact, log, credential, session, recipient identity, or local path is staged;
-- use only the sanitized nondeployable policy example in this repository.
+The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
 
-## Version control
+For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
 
-The project uses semantic versioning. The single source of truth is `version` in [`pyproject.toml`](pyproject.toml), mirrored by `whatsapp_tech_digest.__version__`; update both in the same commit.
+> Some older files in this repository describe the previous v1 architecture. For v2 deployment and operations, this README and `V2_ARCHITECTURE_SPEC.md` are authoritative.
 
-| Version | Scope |
-| --- | --- |
-| `1.2.0` | Explicit all-exclude actionable windows advance as empty without SMTP; malformed or partly material candidates still fail closed (current) |
-| `1.1.0` | Ephemeral two-call extraction/reconciliation candidate with validated atoms and deterministic rendering |
-| `1.0.0` | Operator-only bounded-prefix recovery and portable isolated-review-to-live delivery binding |
-| `0.7.0` | Remove lexical semantic gates, require complete-span grounding, bound generated titles, and separate transport failure from one validation repair |
-| `0.6.0` | Compact one-call dispositions, instructions, and prompt byte measurements |
-| `0.5.0` | One-pass semantic question/issue authority; remove conflicting local lexical gates |
-| `0.4.0` | Cross-day unanswered-question carry-forward/resolution state and Phase 3 semantic pilot |
-| `0.3.0` | Phase 2 findings: `api_token` privacy hardening and deterministic accountability for source-authored status changes |
-| `0.2.1` | Synthetic one-pass quality-evaluation corpus, scoring harness, bounded call accounting, and owner-only evidence controls |
-| `0.2.0` | Source-grounding and identifier-privacy hardening for the one-pass digest |
-| `0.1.0` | Collector, spool, two-stage and one-pass pipelines, reviewed-artifact delivery, inert scheduler source |
+---
 
-Versioning rules for this repository:
-
-- **Major** — a change to the collector-only boundary, the outbound-deny guard, the policy contract, or the reviewed-artifact delivery gate.
-- **Minor** — new or materially changed digest validation, grounding, rendering, privacy projection, or execution-mode behavior.
-- **Patch** — bug fixes, test additions, and documentation that do not change validated output.
-
-Only sanitized source, tests, examples, and documentation are committed. Policy, group directory, spool, rendered artifacts, review manifests, logs, credentials, and session data stay Git-ignored and owner-only. Run the full test suite and `git diff --check` before every commit, and obtain independent review for logic, privacy, or delivery-boundary changes.
-
-## Current Version-Controlled Change
-
-**`1.2.0` — Advance explicitly all-nonmaterial actionable windows without email.**
-
-- An actionable window advances as `empty` only when every supplied source is
-  explicitly `EXCLUDE` and no topic or unanswered item is returned. That
-  validated outcome sends no email and advances the checkpoint without
-  constructing an SMTP message.
-- Any malformed result, empty result with missing disposition coverage, or
-  result containing an `INCLUDE`, `UNCERTAIN`, or `CONTEXT` source still fails
-  closed and leaves the checkpoint unchanged.
-
-## Prior Version-Controlled Changes
-
-**`1.1.0` — Add the Conditional Phase C ephemeral two-call candidate.**
-
-- Call A emits complete source dispositions and exact evidence atoms. Local
-  validation rejects unsupported or unaccounted atoms before Call B receives a
-  factual projection. Call B returns a structural plan rendered from those
-  validated atoms only. The candidate remains unqualified for deployment.
-
-**`1.0.0` — Add bounded-prefix recovery and portable reviewed-artifact delivery.**
-
-- An operator may select one explicit durable cutoff strictly after the checkpoint and no later than the latest durable change. The runner validates the nonempty contiguous prefix before constructing a model and binds that cutoff through event selection, provenance, artifact identity, delivery, and checkpoint advancement.
-- Bounded output is visibly labeled as a historical backlog window and warns that later pending changes may correct or supersede it. The normal unattended wrapper supplies no cutoff or review-bundle arguments, and delivery-capable execution rejects the cutoff option.
-- The bounded review path writes the exact artifact and a canonical owner-only portable envelope. The envelope contains policy/target bindings, checkpoint/cutoff, run/model/count/coverage metadata, artifact and provenance hashes, and revision-only provenance; it contains no message text, rendered prose, recipient, credential, or SMTP data.
-- Delivery through the live spool validates the exact artifact bytes, envelope schema/hash, policy and target bindings, unchanged checkpoint and clear delivery state, exact cutoff, immutable live revisions, and one-time consumption before SMTP. Because the envelope hashes are unkeyed, its source count, candidate count, and run type are additionally recomputed from live sources and its coverage metadata is replaced by live coverage in the durable record, so a rewritten envelope cannot assert unverified facts. It invokes no model and performs no production render. Accepted SMTP advances only the live checkpoint to the reviewed cutoff; failure or uncertainty does not advance it. An unresolved or already-accepted snapshot is terminal, while a transport failure leaves the exact same reviewed artifact retryable.
-- A bounded window is verified against the prefix state at its cutoff, so a later edit to an in-prefix source does not block delivery and remains pending for a subsequent digest. A revoked source always blocks, before the model call at render time and again at delivery time.
-- This phase was implemented and tested entirely offline. It did not invoke a model, access protected configuration or spools, render an operational artifact, contact SMTP, change a service, or alter scheduling.
-
-**`0.7.0` — Harden semantics, grounding, and failure handling.**
-
-- No English word list can include, exclude, classify, resolve, assign confidence to, or reject a production candidate. The acknowledgement, untrusted-policy-override, hedged-confidence, and status-change vocabularies and every enforcement site they drove are removed: normalization no longer emits `mechanical_ack` or `untrusted_policy_override`, the one-pass runner supplies every normalized current revision to the model, and the renderer no longer rejects a candidate for excluding or hedging a vocabulary match. Structural privacy, secret, JID, URL, opaque-reference, and protected-token matching is unchanged.
-- Reader-facing prose is grounded by structure rather than by a negator list. A question, summary, recommendation, action, or limitation must equal exactly one complete mechanically delimited sentence (`.`, `!`, `?`, `;`) of a declared topic source, or that whole source. Mid-sentence clauses, stitched text, and spans that resolve ambiguously to more than one source location are rejected, so a clause can never be lifted out of the polarity, scope, or condition stated around it.
-- Generated titles stay readable but bounded: one line of at most 80 characters, no opaque source reference, no privacy placeholder, and no protected value or numeral that is absent from that topic's own validated reader-facing evidence.
-- Provider transport failure and validation rejection are separate. Timeout, stale termination, child exit, empty output, prompt-budget, output-budget, and CLI-unavailable outcomes are terminal for the application call, so an identical effective final/fallback configuration cannot duplicate provider work and a distinct fallback is never reached by a transport failure. Only a real validation rejection may trigger exactly one repair, and the repair prompt carries a closed content-free failure code — never an exception string, rejected candidate, provider output, stderr, source text, identity, credential, or path.
-- The legacy two-stage pipeline still decides meaning from English vocabulary, so it is explicitly non-production: it cannot register a reviewed artifact, run `delivery-capable`, or deliver a reviewed artifact.
-- Source membership, provenance, question/issue, resolution-evidence, privacy, artifact, delivery, and checkpoint validation are unchanged. No model, protected configuration, runtime state, spool, artifact, SMTP, service, or scheduler was accessed for this phase.
-
-**`0.6.0` — Compact the one-call contract.**
-
-- The provider response uses list-form disposition rows with ordinary string references. Local validation requires exactly one valid disposition for every supplied source and rejects unknown, duplicate, or missing references, including nested topic and unanswered-reference fields. A reference of an unexpected JSON type is rejected as a validation failure rather than raising an unhandled type error.
-- The provider instructions are a concise numbered semantic contract covering material selection, selectivity, grouping, corrections and supersession, questions/issues, tracked resolution, limitations, actions, uncertainty, and confidence. Only prose that merely restated a deterministic check was dropped: exact-excerpt copying, topic selectivity, and title grounding have no local validator and are retained verbatim. Deterministic grounding, privacy, protected-token, title, retry, cutoff, and runtime behavior are unchanged.
-- Source-only measurement reports UTF-8 bytes separately for instructions, serialized schema, projected synthetic sources, and the exact Hermes structured prompt. On the publication-safe 87-source fixture, Phase 1 reduced those components from `7213 / 13837 / 14850 / 36094` bytes to `3709 / 2472 / 14850 / 21225` bytes. A measured `$defs` variant increased the new schema from 2472 to 2609 bytes, so it was not adopted.
-- No model, protected configuration, runtime state, spool, artifact, SMTP, service, or scheduler was accessed for this phase.
-
-**`0.5.0` — Remove conflicting one-pass lexical question/issue gates.**
-
-- The one-pass actionable model remains responsible for semantic `QUESTION` and `ISSUE` classification. The renderer no longer overrides those schema-valid classifications with English question/request, technical-domain, problem, or resolution word lists.
-- Deterministic validation still requires reader-facing question text to be an exact source excerpt and verifies source ownership, allowed dispositions, topic/unanswered separation, uniqueness, distinct answer evidence, protected values, privacy, and revision-only provenance.
-- The model prompt still forbids recasting announcements, instructions, status statements, and directives as questions and limits unanswered entries to unresolved questions/issues. Semantic quality is checked during isolated artifact review instead of being guessed from vocabulary.
-- The legacy two-stage pipeline and the separate acknowledgement, untrusted-policy-override, confidence, status-recall, and negation controls were unchanged at that time; version `0.7.0` removes them from every production path.
-
-**`0.4.0` — Add cross-day question state and the Phase 3 semantic pilot.**
-
-- In the one-pass actionable pipeline, accepted unanswered questions and problem statements are retained by stable message identity plus their current immutable revision, then carried into the next nonempty source window without replaying unrelated history. A switch to the legacy two-stage path fails closed while carried state exists because that path has no actionable provenance contract.
-- Edits rebind tracked state to the edited revision so it cannot be silently omitted. Revocations remove the tracked item and release its prior source revision for normal raw-message purging.
-- Later validated source-backed answers explicitly classify a carried item as `partial` or `resolved`; the presence of a limitation alone does not imply an incomplete answer. A normal question/issue resolution must contain reader-facing evidence grounded in a distinct included answer revision. An edited tracked revision declared as `UPDATE` is the only self-resolution exception. Both question and declarative-issue resolutions are supported, and omission still fails before render-only output or SMTP.
-- The one-pass prompt receives only allowlisted state/revision hints: `tracked_item` for tracked sources and an `edit` revision kind for edited actionable sources. Stable message identity and spool metadata remain local.
-- Open and partially answered current source revisions are excluded from raw-message purging. Resolved state is removed after its source revision reaches normal retention expiry, and the coupled purge steps execute in one explicit transaction.
-- Cross-day state is checked before any legacy two-stage model construction, even with no new pending events. A tracked edit removed by deterministic acknowledgement/policy-override filtering blocks before model construction and must be corrected or revoked at the source before retrying. An answer revoked or superseded before an unknown delivery is reconciled cannot close the tracked item.
-- A fully synthetic three-day fixture exercises limited workarounds, version scope, unanswered retention, acknowledgement removal, source-only topics, readable titles, and current-window date labels. A follow-up review corrected its verification-command answer from `partial` to `resolved` because the requested verification capability was fully answered despite a repair limitation.
-- The pilot did not invoke a configured model provider. Phase 2 provider-quality acceptance remains pending its separately approved focused rerun.
-- Final independent source re-review, deployment, reviewed-artifact acceptance, delivery, service activation, and scheduling remain separate approvals.
-
-The prior `0.3.0` release applied the first Phase 2 quality findings:
-
-- The initial 16-run synthetic smoke test used 19 Hermes calls and did not meet the model-quality gates. Sanitized aggregates and remediation are recorded in [`ONE_PASS_EVALUATION_FINDINGS.md`](ONE_PASS_EVALUATION_FINDINGS.md).
-- Shared projection redaction now covers `api_token=...`, closing the concrete privacy regression found in both privacy-window prompts.
-- Version `0.3.0` added a deterministic recall net requiring any declarative, unhedged source statement that something was scheduled, confirmed, moved, postponed, or cancelled to be included or uncertain and assigned to a topic or an unanswered entry. Version `0.7.0` removes that lexical net: the model now owns that decision, and no vocabulary match can reject a candidate.
-- The privacy corpus now represents actionable guidance as a normal update and a separately stated unresolved problem as unanswered, matching the current schema contract.
-- Focused post-remediation Hermes reruns and human unsupported-content review remain separately approval-gated; model quality is not yet accepted.
-
-The `0.2.1` evaluation infrastructure included:
-
-- Eight synthetic public windows cover manager-critical assignments, answered and unanswered questions, actionable guidance with a source-backed limitation, supersession, uncertain field guidance, privacy-sensitive identifier forms, the fabricated migration-topic regression, and all-nonmaterial input.
-- Two exploratory runs per window require 16 evaluation runs and 16–32 possible Hermes calls. No Hermes evaluation is authorized merely by this source.
-- Required atoms are manager-critical and gate at zero omissions; optional atom recall is reported separately.
-- Models are constructed through the existing validated configuration/provider path. Detailed prompts, raw responses, rendered digests, and logs stay owner-only outside Git; only sanitized aggregate findings may be published.
-- Evaluation-infrastructure acceptance and model-quality acceptance are separate decisions. See [`ONE_PASS_EVALUATION_SPEC.md`](ONE_PASS_EVALUATION_SPEC.md).
-
-The underlying `0.2.0` accuracy and privacy hardening remains in force:
-
-Grounding:
-
-- Substantive reader prose (question, narrative, recommendation, actions, limitation) must be one complete mechanically delimited normalized source sentence, or the complete normalized source, after identity sanitization; fuzzy matching, cross-source stitching, mid-word excerpts, mid-sentence clauses, and ambiguous spans are rejected.
-- Because every atom is a whole sentence or whole source, a prohibition cannot be rendered as an instruction without maintaining an English negator vocabulary.
-- Protected technical identifiers use exact token occurrence instead of substring containment, covering short and punctuation-bearing forms such as `v2`, `3PAR`, `SRX_345`, `802.11ax`, and `C++17`.
-
-Question and unresolved-issue classification before `0.5.0` (superseded for one-pass rendering):
-
-- A reader-facing question previously required a model-declared `QUESTION` kind plus a local lexical check on both the cited source and selected excerpt.
-- A bare wh- opening previously required interrogative punctuation as part of that local reclassification.
-- `ISSUE` entries previously required a local unresolved-problem vocabulary signal and rejected local resolution phrases. Version `0.5.0` removes these one-pass gates; the legacy two-stage pipeline retains its separate lexical compatibility behavior.
-- Unanswered topic labels are internal metadata and are not rendered; reader status text is derived locally. Unanswered entries are capped at eight.
-
-Privacy:
-
-- One shared identifier sanitizer backs both the model projection and reader-facing output, covering numeric mentions with optional `+` and device suffixes, participant/group/web/`lid` JID forms, and newsletter/broadcast handles.
-
-Other:
-
-- An unanswered-only source window is valid; only a window with neither retained updates nor validated unanswered items is rejected.
-- A `recommendation` is no longer dropped when the same topic also carries explicit actions.
-- Generated systemd units use `%h` instead of an embedded home path.
-- Restored the publication-safe [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md), [`RUNBOOK.md`](RUNBOOK.md), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
-
-An all-nonmaterial active window advances only when the actionable model returns
-complete source coverage with every disposition explicitly `EXCLUDE` and no
-topics or unanswered entries. It produces no email. Any malformed response or
-any `INCLUDE`, `UNCERTAIN`, or `CONTEXT` source without a valid rendered
-structure still fails closed and keeps the checkpoint unchanged.
-
-These are inert source artifacts. They do not install or enable units, access credentials, run a model, send email, or activate a schedule. Production policy, runtime state, credentials, rendered artifacts, and activation evidence remain owner-only and Git-ignored.
-
-## Data flow
+## Architecture
 
 ```text
-Approved WhatsApp group (exact immutable JID)
-  -> loopback Baileys bridge
-  -> fail-closed collector hook and outbound POST guard
-  -> durable local SQLite spool
-  -> deterministic normalization/redaction
-  -> selected digest pipeline
-  -> local rendered artifact
-  -> fixed-recipient SMTP (approved delivery-capable execution)
+WhatsApp
+   |
+   v
+whatsapp-digest-bridge.service
+  127.0.0.1:3001
+  configured groups only
+   |
+   v
+whatsapp-digest-collector.service
+   |
+   v
+SQLite
+   |
+   v
+per-workflow systemd timer
+   |
+   v
+Hermes model worker
+   |
+   v
+validate -> render -> SMTP email
+   |
+   v
+checkpoint
 ```
 
-### Supported digest modes
+Hermes may continue running its normal gateway for Telegram or other integrations, but the Hermes gateway's own WhatsApp adapter must remain disabled. This prevents two consumers from competing for the same WhatsApp session/message queue.
 
-#### Two-stage local mode
+---
 
-```text
-normalized messages
-  -> loopback Ollama qwen3.5:4b high-recall selection
-  -> qwen3.5:9b grounded digest
-  -> qwen3.5:4b fallback
-```
+## Safety model
 
-This remains the default for policies that omit `models.pipeline_mode`.
+The v2 design intentionally keeps WhatsApp content out of normal Hermes conversational dispatch.
 
-#### One-pass explicit Hermes CLI mode
+Key guarantees:
 
-```text
-all eligible normalized current message revisions
-  -> Hermes local CLI adapter
-  -> openai-codex or copilot / gpt-5.6-terra / explicit high reasoning
-  -> thread-level actionable schema
-  -> strict local validation and rendering
-```
+- only configured WhatsApp group JIDs are admitted by the supervised bridge;
+- direct messages are ignored by the collector;
+- the collector only performs `GET /messages` against the bridge;
+- the application has no WhatsApp send/edit/typing path;
+- WhatsApp source text is treated as untrusted data, never as instructions;
+- model execution is one-shot with tools, memory, and context files disabled;
+- email recipients come only from trusted `config.yaml`;
+- model output is schema-validated before rendering or delivery;
+- a failed model/validation/delivery run does not advance the checkpoint;
+- dry-runs never email and never advance the checkpoint;
+- processed raw messages are retained only for the configured retention period;
+- pending messages are never removed by retention;
+- logs contain operational metadata/counts, not WhatsApp message bodies.
 
-Set `"pipeline_mode": "one_pass"` only with an explicit Hermes CLI provider (`hermes-openai-codex` or `github-copilot`) and endpoint `local://hermes-cli`. Model, provider, and reasoning are policy-pinned; they do not inherit Hermes defaults. This remains the compact actionable baseline, although its failed Phase 4 gate makes it ineligible for selection. The runner bypasses Ollama preclassification so supporting context in the eligible source window is not dropped. The model clusters that window, while the local renderer validates source references, complete-sentence or complete-source normalized and privacy-sanitized excerpts, exact protected-token membership, bounded generated titles, attribution, confidence, and unresolved issues. A mid-sentence, stitched, or ambiguously resolving excerpt is rejected, so an instruction cannot be lifted out of its negation, scope, or condition. See `MODEL_PROVIDER_SWITCHING.md` for the owner-only GitHub Copilot policy shape and approval boundary.
+The standalone Hermes bridge binary exposes outbound endpoints because it is an upstream component, but v2 never calls them.
 
-#### Ephemeral two-call Hermes Codex candidate
+---
 
-Set `"pipeline_mode": "two_call"` only with the same Hermes connector and policy-pinned model/reasoning settings. Call A sees the complete allowlisted projected window and returns one disposition per source plus exact evidence atoms. Local validation blocks unsupported atoms before Call B. Call B sees only validated atoms and structural context, returns no factual prose, and the local renderer inserts exact atoms into its plan. The path stores no semantic cache or ledger, bypasses the legacy preclassifier, normally uses two application calls, and permits at most one closed-code validation repair for a maximum of three. Transport or empty-output failure is terminal. Phase C source review is accepted. The first two-call Phase 4 repeat exposed the installed Hermes v0.21.3 high-effort small-prompt watchdog defect; the upstream effort-aware correction (`a6cad512a5`, `ebd106f3ec`) is pinned on the local Hermes branch at `1e1c0a9c9e` and covered by a no-network regression. An approved post-repair repeat confirmed that all three permitted provider calls can now complete, but both reconciliation candidates failed the same local `DISPOSITION` invariant after extraction validated 24 atoms. No rendered artifact was accepted. The prompt's previously one-way accounting rule now explicitly matches the validator's bidirectional contract and has a regression test, but the candidate remains unqualified and unselected as `NOT ELIGIBLE — VALIDATION FAILURE`; another model run requires separate approval.
+## Prerequisites
 
-In both actionable modes, `preclassifier` and `classifier_instruction` remain schema-compatibility fields but are unused.
+1. Linux with systemd and a working user systemd manager.
+2. Python 3.11 or newer.
+3. Hermes installed under `~/.hermes`.
+4. Hermes WhatsApp bridge dependencies installed.
+5. A paired WhatsApp session.
+6. An SMTP account/relay.
+7. The repository checked out on the v2 code.
 
-Phase C review remediation binds reviewed-artifact candidate counts to the complete normalized window, applies topic/unanswered ownership to whole source revisions rather than individual atoms, permits self-resolution only for an edited tracked `UPDATE`, and keeps policy-sourced final instructions out of Call B and its repair. Independent re-review returned `APPROVE`, and the operator recorded acceptance before the provider-backed repeats.
+The transport installer automatically discovers:
 
-Redaction scope: normalization derives a `redacted_text` field that masks secret-shaped assignments, opaque numeric mentions including optional `+` and device suffixes, supported WhatsApp participant/group/web JID forms, and newsletter/broadcast handles. The same shared identifier sanitizer protects source text quoted by the local renderer. Model prompts use an explicit projection containing opaque per-request source refs, redacted text, timestamps, resolvable opaque reply linkage, a tracked-item boolean where applicable, and an edit-kind hint for edited actionable sources only. Raw message IDs, participant/display metadata, chat identifiers, and runtime metadata remain local. Both actionable modes supply every normalized current source revision to their first model stage and let that stage dispose of each one; if deterministic normalization removes a tracked revision, processing blocks before model construction.
+- Hermes bridge script under `~/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js`;
+- Hermes bundled Node.js under `~/.hermes/tools/node-*/bin/node`;
+- paired session under either:
+  - `~/.hermes/whatsapp/session`, or
+  - `~/.hermes/platforms/whatsapp/session`.
 
-The verified replay policy uses `reasoning_effort: high`, passed explicitly as `hermes chat --reasoning high`; it is not inherited from the active Hermes profile. Credentials remain inside Hermes' supported stored OAuth abstraction.
-
-The one-pass actionable path is structurally isolated into `actionable_schema.py`, `actionable_validate.py`, and `actionable_render.py`; the two-call candidate is isolated in `ephemeral_two_call.py` and reuses the same local safety helpers. `models.py` retains compatibility entry points for the legacy two-stage pipeline. That legacy path still resolves meaning from English vocabulary and is therefore explicitly non-production: `DigestConfig.require_production_pipeline()` blocks it from `delivery-capable` runs, reviewed-artifact registration, and reviewed-artifact delivery.
-
-### Explicit runner execution modes
-
-The runner does not use an ambiguous `dry_run` switch. It accepts `--execution-mode` and defaults to the safest mode:
-
-- `validate-only` (default): parses policy, snapshots the spool, checks omissions/current revisions, and performs deterministic normalization. It never builds a model, sends SMTP, records a digest run, or advances a checkpoint.
-- `render-only`: performs the same integrity checks and allows model rendering, printing the rendered digest. With explicit review artifact and envelope paths it writes both as owner-only files. It never sends SMTP, records a digest run, or advances a checkpoint. In actionable Hermes modes, only allowlisted redacted sources or locally validated atom projections cross the local Hermes CLI/provider boundary.
-- `delivery-capable`: is the only mode permitted to call SMTP or persist digest-run/checkpoint outcomes. It invokes `require_live_safe()` and remains subject to the separate live-policy and operational-approval gates; selecting it in source does not authorize activation or delivery.
-
-Read-only state commands (`--health`, `--status`, `--purge`, and reconciliation commands) do not accept a non-default execution mode.
-
-### Reviewed-artifact delivery boundary
-
-A render-only run may be given `--review-manifest <owner-only.json>` and `--review-artifact <owner-only.md>`. After deterministic output validation, it writes the exact artifact and a canonical portable envelope containing checkpoint/cutoff, artifact/policy/target/provenance hashes, run/model/count/coverage metadata, and revision-only provenance—never source text inside the envelope, recipient data, credentials, or SMTP data. Both files are created mode `0600` under an owner-only parent; delivery refuses any artifact or envelope that is not a regular owner-only file, so a shell-redirected copy of the rendered output is not deliverable. This does not create a digest run/provenance record, contact SMTP, or advance the checkpoint.
-
-A later `--execution-mode delivery-capable --review-manifest <owner-only.json> --deliver-reviewed-artifact <reviewed.md>` lets the live spool independently validate and consume the portable envelope. It verifies the exact artifact bytes, canonical envelope and hashes, policy/target binding, immutable live source revisions, cutoff, checkpoint, delivery state, and replay state before SMTP, and recomputes the window's source count, candidate count, and run type from live data rather than trusting the envelope. It sends the reviewed bytes directly and **does not rerun a model or render against production**. A changed artifact/envelope, changed policy, wrong target, revoked source, changed checkpoint, count/run-type mismatch, or replay of an accepted or unresolved snapshot blocks SMTP; a transport failure leaves the same artifact retryable.
-
-An operator-only historical recovery render additionally supplies `--bounded-cutoff <durable-change-sequence>`. This option is valid only with `render-only`, `--review-manifest`, and `--review-artifact`. It selects the whole pending prefix through that cutoff, bypasses the normal age horizon without omitting rows, labels the artifact as historical, and leaves every later durable change pending. The scheduler and unattended wrapper cannot select this mode.
-
-### Hermes CLI size budgets
-
-The local Hermes CLI exposes no model-output cap flag (verified with `hermes chat --help`), so its limits are enforced in the adapter rather than implied by a nonexistent CLI option:
-
-- `models.context_limit` is a mandatory UTF-8 byte ceiling for the entire Hermes prompt, including the structured-output contract. An oversized prompt fails before a temporary prompt file is created or Hermes is invoked.
-- `models.max_output_chars` is a mandatory character ceiling on Hermes stdout, checked before any JSON/schema parsing or repair attempt. An oversized candidate fails closed; it is never truncated.
-- `models.max_output_tokens` remains the actual provider request limit for Ollama and direct HTTPS providers. It is not claimed as a Hermes CLI control.
-
-### Declarative-only policy fields
-
-The complete field-use matrix and schema-v1 compatibility decision are in [`POLICY_CONTRACT.md`](POLICY_CONTRACT.md). Some schema fields are validated as a deployment contract but are not read by the runtime, and the documentation does not claim otherwise:
-
-- `retention` must be exactly `raw_days=7`/`digest_days=90`; `DurableSpool.purge()` applies those same values as code constants rather than reading the policy.
-- `contacts.fallback` is validated, but attribution always prefers `display_name` and falls back to `participant` regardless of the setting.
-- `redaction.enabled` must be `true` and cannot be turned off; it selects no alternative behavior.
-- `runtime.lock_seconds`, `runtime.max_runtime_seconds`, and `health.heartbeat_seconds` are validated as positive integers only. Run exclusivity comes from the `--lock` flock and there is no in-process runtime cap.
-- `models.context_limit` bounds the prompt only for explicit Hermes CLI providers (`hermes-openai-codex` and `github-copilot`). The Ollama and direct HTTPS adapters apply no prompt-size ceiling.
-
-## Reader-facing summarization goal
-
-The final digest should be a selective senior-engineer brief, not a transcript. It renders no raw-message audit section and hides empty/non-applicable fields. A retained Q&A topic begins with an exact normalized, privacy-sanitized source excerpt in `Question asked`; generated titles organize the brief, while substantive questions, summaries, recommendations, actions, and limitations must each be a contiguous source excerpt. Announcements and directives render directly as updates and actions. Retain only reusable material such as:
-
-- concrete upgrade/version guidance and failure signatures;
-- operational commands and procedures;
-- migration tools and explicit scope limitations;
-- troubleshooting conclusions and superseded-advice corrections;
-- useful repositories, KBs, and documentation URLs;
-- materially important unresolved questions with asker attribution;
-- field guidance clearly distinguished from confirmed documentation.
-
-It is better to omit minor discussion than flood the digest with low-value chatter.
-
-## Native collector plugin
-
-`hermes_plugin/whatsapp_tech_digest_collector/` is the deployable native Hermes plugin package installed under `~/.hermes/plugins/`. It has no tool, model, SMTP, scheduler, or platform-action capability. For the exact policy-pinned group, it converts the minimal inbound bridge event to a durable spool record and returns `{"action":"skip"}`. Target-event record conversion, spool initialization, or spool-write failures are caught locally and return the generic fail-closed `{"action":"skip","reason":"whatsapp_tech_digest_collection_failed"}` directive; no event content, participant, message ID, or JID is emitted in failure telemetry. Each target hook invocation owns and closes its SQLite handle; appends use a bounded 250 ms SQLite busy timeout plus one retry for a transient lock, while exhausted failures still return the same generic fail-closed directive. Non-target events preserve normal dispatch.
-
-## Safety invariants
-
-1. **One exact group identifier.** Never use display-name matching, aliases, wildcards, or bare numbers.
-2. **Collector-only behavior.** Group content must never become a normal Hermes agent turn.
-3. **No WhatsApp output.** Deny send, edit, media, poll, location, typing, read-receipt, progress, and unknown output routes.
-4. **Loopback services.** Keep the bridge at `127.0.0.1:17778` and Ollama at `127.0.0.1:11434`.
-5. **Private artifacts.** Policies, exports, databases, logs, backups, prompts, and digests are owner-only and ignored.
-6. **No silent delivery.** SMTP requires a fixed recipient, protected credential reference, acceptance reconciliation, and separate approval.
-7. **No automated schedule yet.** Scheduling/activation remains separately gated.
-8. **Fail closed.** Source-coverage, revocation, schema, grounding, model, or delivery uncertainty blocks checkpoint advancement.
-9. **Separate approvals.** Artifact acceptance does not authorize merge, deployment, restart, target restoration, inference activation, SMTP, scheduling, or cleanup.
-10. **Revision-only provenance.** A validated actionable digest that reaches accepted or delivery-unknown state stores a hash-bound, owner-only topic-to-immutable-revision envelope. It contains no message text, participant display name, reader-facing prose, URL, or model rationale; failed candidates never receive trusted provenance.
-
-## Documentation map
-
-- `AGENTS.md` — mandatory durable rules for any coding model.
-- `HANDOFF.md` — current development and live-runtime facts, evidence, gaps, and next approval gates.
-- `MODEL_PROVIDER_SWITCHING.md` — provider, actionable pipeline, explicit reasoning, and credential-boundary behavior.
-- `ARCHITECTURE_THREAT_MODEL.md` — components, trust boundaries, assets, and controls.
-- `DEPLOYMENT_GUIDE.md` — staged deployment and rollback boundaries.
-- `RUNBOOK.md` — operational verification and incident procedures.
-- `IMPLEMENTATION_PLAN.md` — historical implementation/evidence map.
-- `ONE_PASS_EVALUATION_SPEC.md` — synthetic one-pass Phase 2 corpus, scoring gates, call budget, and evidence boundary.
-- `ONE_PASS_EVALUATION_FINDINGS.md` — sanitized aggregate Phase 2 results, findings, and remediation status.
-- `DAILY_SCHEDULER_DESIGN.md` — staged production cadence and reviewed-delivery design; no timer is enabled.
-- `config/digest.policy.example.json` — sanitized nondeployable schema example; real policies are ignored.
-
-## Safe candidate verification
+If WhatsApp has never been paired, use the supported Hermes pairing flow first:
 
 ```bash
-cd "$REPLAY_WORKTREE"
-PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -q
+hermes whatsapp
+```
+
+After pairing, disable WhatsApp in the normal Hermes gateway as described below.
+
+---
+
+## Initial installation
+
+### 1. Clone/check out the v2 branch
+
+```bash
+git clone https://github.com/egori4/whatsapp_summarizer.git
+cd whatsapp_summarizer
+git checkout v2-workflow-rebuild
+```
+
+### 2. Create the virtual environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+Validate the code:
+
+```bash
+pytest -q tests/test_v2_*.py
+```
+
+### 3. Create the configuration
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Edit `config.yaml` with the real group JIDs, SMTP settings, recipients, workflow instructions, schedules, and model settings.
+
+Validate it:
+
+```bash
+digest --config ./config.yaml config validate
+```
+
+### 4. Disable WhatsApp inside the normal Hermes gateway
+
+The v2 project owns the dedicated WhatsApp bridge. The normal Hermes gateway must not also start a WhatsApp bridge.
+
+Check:
+
+```bash
+grep '^WHATSAPP_ENABLED=' ~/.hermes/.env
+```
+
+Set:
+
+```text
+WHATSAPP_ENABLED=false
+```
+
+If Hermes gateway is installed as the system service used on this host:
+
+```bash
+sudo systemctl restart hermes-gateway.service
+```
+
+Verify no old Hermes WhatsApp listener remains:
+
+```bash
+ss -ltnp | grep ':17778\b' || true
+```
+
+Do not run the normal Hermes WhatsApp adapter and the v2 bridge at the same time.
+
+### 5. Configure the SMTP secret for scheduled runs
+
+The SMTP password is not stored in `config.yaml`. The config contains only the environment-variable name, for example:
+
+```yaml
+email:
+  password_env: WHATSAPP_DIGEST_SMTP_PASSWORD
+```
+
+The generated scheduled services load `digest.env` from the project directory.
+
+Create it with owner-only permissions:
+
+```bash
+read -rsp "SMTP password: " SMTP_SECRET
+echo
+printf 'WHATSAPP_DIGEST_SMTP_PASSWORD=%s\n' "$SMTP_SECRET" > digest.env
+unset SMTP_SECRET
+chmod 600 digest.env
+```
+
+`digest.env` is Git-ignored.
+
+For manual `digest email test` or manual delivery-capable `digest run` commands, the password variable must also exist in that shell environment.
+
+### 6. Install the supervised WhatsApp transport
+
+```bash
+digest --config ./config.yaml transport install
+```
+
+This generates and enables:
+
+- `whatsapp-digest-bridge.service`
+- `whatsapp-digest-collector.service`
+
+The bridge service automatically gets:
+
+```text
+WHATSAPP_GROUP_POLICY=allowlist
+WHATSAPP_GROUP_ALLOWED_USERS=<all workflow group_jids from config.yaml>
+```
+
+The installer:
+
+- refuses to proceed if Hermes gateway WhatsApp is still enabled;
+- refuses an unmanaged bridge already responding on the configured endpoint;
+- verifies the generated systemd units;
+- starts/restarts the managed bridge;
+- waits for the bridge to report `connected`;
+- starts/restarts the collector;
+- verifies both services are active.
+
+Check:
+
+```bash
+digest --config ./config.yaml transport status
+```
+
+Healthy output should show:
+
+```text
+Hermes WhatsApp: disabled
+Bridge enabled: enabled
+Bridge active: active
+Bridge health: connected
+Collector enabled: enabled
+Collector active: active
+User linger: yes
+```
+
+Direct verification:
+
+```bash
+systemctl --user status whatsapp-digest-bridge.service --no-pager -l
+systemctl --user status whatsapp-digest-collector.service --no-pager -l
+ss -ltnp | grep ':3001\b'
+```
+
+### 7. Enable user lingering
+
+User services should survive logout and start after reboot without waiting for an interactive login.
+
+Check:
+
+```bash
+loginctl show-user "$USER" -p Linger
+```
+
+If needed:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+Expected:
+
+```text
+Linger=yes
+```
+
+### 8. Test SMTP
+
+Make the password variable available in the current shell, then:
+
+```bash
+digest --config ./config.yaml email test <workflow-id>
+```
+
+Example:
+
+```bash
+digest --config ./config.yaml email test tests
+```
+
+The command prints the effective SMTP configuration without printing the password.
+
+SMTP acceptance means the relay accepted the message; it does not guarantee inbox placement. If accepted mail is missing, check spam/quarantine, relay logs, bounces, or the provider's message trace.
+
+### 9. Install workflow schedules
+
+```bash
+digest --config ./config.yaml schedule install
+```
+
+Check:
+
+```bash
+digest --config ./config.yaml schedule status
+systemctl --user list-timers 'whatsapp-digest-*'
+```
+
+A healthy scheduled workflow should be `enabled`, `active`, have a real `Next` time, and report `Health: healthy`.
+
+Systemd may display the next activation in UTC even though the calendar is configured with the workflow timezone. The configured timezone remains authoritative and DST is handled by systemd.
+
+### 10. Initialize each workflow explicitly
+
+A new workflow starts as:
+
+```text
+NEEDS_INITIAL_RUN
+```
+
+The scheduler will **not** guess a starting point.
+
+Choose one explicit initial window.
+
+Examples:
+
+Start with the last 24 hours already present in SQLite:
+
+```bash
+digest --config ./config.yaml run global-ps --last 24h
+```
+
+Start at a specific local time:
+
+```bash
+digest --config ./config.yaml run global-ps --since "2026-09-28 00:00"
+```
+
+A timestamp without an offset is interpreted in that workflow's configured timezone.
+
+Start fresh from approximately now:
+
+```bash
+digest --config ./config.yaml run global-ps --since "$(date -Iseconds)"
+```
+
+Important: `--last` and `--since` query the **local SQLite database only**. They do not retrieve WhatsApp history. Messages sent before the v2 bridge/collector collected them cannot be backfilled.
+
+A real initial run with zero matching rows still initializes the workflow at the current collected cutoff. This is the intended way to establish a clean baseline.
+
+Check:
+
+```bash
+digest --config ./config.yaml status global-ps
+```
+
+Expected after initialization:
+
+```text
+State: READY
+```
+
+---
+
+## Configuration
+
+See [config.example.yaml](config.example.yaml) for a complete example.
+
+### Global paths
+
+```yaml
+paths:
+  database: ./data/messages.db
+  log: ./logs/digest.log
+```
+
+Relative paths are resolved relative to `config.yaml`.
+
+### Retention
+
+```yaml
+retention:
+  processed_raw_days: 7
+  log_days: 30
+```
+
+After successful real runs, processed messages older than `processed_raw_days` are removed. Pending messages are never purged by retention.
+
+Log files use configured log retention.
+
+### Hermes model gateway
+
+```yaml
+hermes:
+  command: hermes
+  timeout_seconds: 600
+```
+
+The model worker uses the installed Hermes runtime without modifying Hermes core.
+
+Per workflow:
+
+```yaml
+model:
+  provider: inherit
+  name: inherit
+  reasoning: inherit
+```
+
+Overrides may be set when supported by the installed Hermes runtime.
+
+The run output records the actual provider, model, and reasoning used.
+
+### WhatsApp
+
+```yaml
+whatsapp:
+  bridge_url: http://127.0.0.1:3001
+  poll_interval_seconds: 1
+```
+
+The production deployment expects the bridge on loopback.
+
+### Email
+
+```yaml
+email:
+  host: smtp.example.com
+  port: 587
+  sender: digest@example.com
+  username: digest@example.com
+  password_env: WHATSAPP_DIGEST_SMTP_PASSWORD
+  starttls: true
+  timeout_seconds: 30
+```
+
+Workflow delivery:
+
+```yaml
+delivery:
+  email:
+    to:
+      - user@example.com
+    cc: []
+    attach_raw_messages: true
+    subject: "[TechTeam Daily] {date} — {workflow_name}"
+```
+
+Supported subject fields:
+
+- `{date}`
+- `{workflow_name}`
+- `{workflow_id}`
+- `{run_id}`
+
+Recipients are fixed by config; WhatsApp/model content cannot change them.
+
+### Schedules
+
+Daily:
+
+```yaml
+schedule:
+  type: daily
+  at: "08:00"
+```
+
+Weekly:
+
+```yaml
+schedule:
+  type: weekly
+  at: "08:00"
+  days: [mon, wed, fri]
+```
+
+Monthly:
+
+```yaml
+schedule:
+  type: monthly
+  at: "08:00"
+  day: 1
+```
+
+The workflow timezone defaults to `defaults.timezone` and may be overridden in the workflow schedule.
+
+Omit `schedule` for manual-only workflows.
+
+### Summarization
+
+Each workflow may provide trusted instructions and optional sections:
+
+```yaml
+summarization:
+  instructions: |
+    Focus on technical problems, troubleshooting, root cause, fixes,
+    versions, workarounds, useful commands and links, important
+    administrative announcements, explicit actions, and unanswered questions.
+  sections:
+    - id: technical_updates
+      title: Technical Updates
+      guidance: Technical issues, fixes and guidance.
+```
+
+Configured sections are optional. Empty sections are omitted. If no sections are configured, the model may use validated dynamic headings.
+
+---
+
+## CLI reference
+
+| Command | Purpose |
+| --- | --- |
+| `digest --config ./config.yaml config validate` | Validate configuration and fail on invalid values. |
+| `digest --config ./config.yaml status` | Show state/pending count for all workflows. |
+| `digest --config ./config.yaml status <workflow>` | Show one workflow. |
+| `digest --config ./config.yaml whatsapp groups` | List group metadata previously discovered by the collector. |
+| `digest --config ./config.yaml collector once` | Poll `/messages` once and print counts. Mainly diagnostic. |
+| `digest --config ./config.yaml collector run` | Run collector in foreground. Normally systemd owns this. |
+| `digest --config ./config.yaml email test <workflow>` | Send a source-free SMTP test using the workflow recipients. |
+| `digest --config ./config.yaml run <workflow> --last 24h --dry-run` | Generate/validate preview without email or checkpoint change. |
+| `digest --config ./config.yaml run <workflow> --since <time> --dry-run` | Preview an explicit initial/manual window. |
+| `digest --config ./config.yaml run <workflow>` | Process pending changes for an initialized workflow. |
+| `digest --config ./config.yaml run <workflow> --last 24h` | Real explicit-window run; useful for initialization/manual replay of collected rows. |
+| `digest --config ./config.yaml transport install` | Generate/reinstall/restart managed bridge and collector services. |
+| `digest --config ./config.yaml transport status` | Show Hermes WhatsApp state, bridge/collector state, health and linger. |
+| `digest --config ./config.yaml transport remove` | Stop/disable/remove v2 bridge and collector units. |
+| `digest --config ./config.yaml schedule install` | Generate/update/enable workflow timers. |
+| `digest --config ./config.yaml schedule status` | Show timer schedule, enabled/active state, next activation and health. |
+| `digest --config ./config.yaml schedule remove` | Stop/disable/remove generated digest timers/services. |
+
+`--scheduled` is an internal flag used by generated systemd services and is not intended for normal operator use.
+
+---
+
+## Dry-runs
+
+Example:
+
+```bash
+digest --config ./config.yaml run tests --last 2d --dry-run
+```
+
+A successful dry-run prints the text digest and writes owner-only artifacts under:
+
+```text
+<data-directory>/dry-runs/<run-id>/
+  digest.txt
+  digest.html
+  raw_messages.txt
+```
+
+The raw file is the exact sanitized source window supplied to the model.
+
+Dry-runs:
+
+- may call the model;
+- never send email;
+- never initialize a workflow;
+- never advance a checkpoint.
+
+---
+
+## Run statuses
+
+Common statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `needs-initial-run` | Scheduled workflow has never been initialized; nothing processed. |
+| `success-no-pending` | No pending rows; checkpoint/baseline remains successful. |
+| `success-no-usable` | Pending changes existed but none contained usable text/caption. |
+| `success-no-material` | Model/validation succeeded but there was nothing worth emailing. Checkpoint advanced. |
+| `delivered` | SMTP accepted the material digest and checkpoint advanced. |
+| `dry-run-success` | Preview generated successfully; checkpoint unchanged. |
+| `dry-run-no-material-updates` | Valid preview contained no material items; checkpoint unchanged. |
+| `failed` | Model, validation, freshness, rendering, or delivery failed; checkpoint did not advance. |
+
+`delivered` means accepted by the configured SMTP server, not guaranteed inbox delivery.
+
+There is an unavoidable at-least-once edge case: if SMTP accepts a message and the process crashes before the local success/checkpoint transaction commits, a retry may send a duplicate. The system favors not losing a digest over pretending SMTP provides exactly-once semantics.
+
+---
+
+## Routine operations
+
+### Overall workflow state
+
+```bash
+digest --config ./config.yaml status
+```
+
+### Transport health
+
+```bash
+digest --config ./config.yaml transport status
+```
+
+### Scheduler health
+
+```bash
+digest --config ./config.yaml schedule status
+systemctl --user list-timers 'whatsapp-digest-*'
+```
+
+### Application log
+
+```bash
+tail -f ./logs/digest.log
+```
+
+The log intentionally contains operational metadata such as run IDs, provider/model information, SMTP acceptance, collector counts, and failures. It does not intentionally log WhatsApp message bodies or SMTP passwords.
+
+### systemd journals
+
+```bash
+journalctl --user -u whatsapp-digest-bridge.service -n 100 --no-pager
+journalctl --user -u whatsapp-digest-collector.service -n 100 --no-pager
+journalctl --user -u whatsapp-digest-<workflow>.service -n 100 --no-pager
+```
+
+### Confirm listeners
+
+```bash
+ss -ltnp | grep -E ':(17778|3001)\b'
+```
+
+Normal v2 deployment:
+
+- `3001`: dedicated v2 bridge listening;
+- `17778`: no competing Hermes WhatsApp bridge.
+
+---
+
+## Changing configuration
+
+### Change instructions/model/recipients
+
+Edit `config.yaml`, validate it, and future runs will read the new values:
+
+```bash
+digest --config ./config.yaml config validate
+```
+
+No service regeneration is normally required.
+
+### Change schedule
+
+After editing schedule settings:
+
+```bash
+digest --config ./config.yaml schedule install
+```
+
+### Add/remove/change a WhatsApp group or workflow
+
+After editing workflows/group JIDs:
+
+```bash
+digest --config ./config.yaml config validate
+digest --config ./config.yaml transport install
+digest --config ./config.yaml schedule install
+```
+
+Then initialize any new workflow explicitly.
+
+If a logical workflow moves to a completely different WhatsApp group, prefer a **new workflow ID** instead of reusing the old ID, so old checkpoint state cannot be confused with the new source.
+
+---
+
+## Updating the application
+
+Recommended update procedure:
+
+```bash
+cd ~/scripts/whatsapp-tech-digest
+git pull
+source .venv/bin/activate
+pip install -e .
+pytest -q tests/test_v2_*.py
+
+digest --config ./config.yaml config validate
+digest --config ./config.yaml transport install
+digest --config ./config.yaml schedule install
+digest --config ./config.yaml transport status
+digest --config ./config.yaml schedule status
+```
+
+Re-running `transport install` is safe: it rewrites the managed units, restarts an already-running managed bridge/collector so new settings take effect, waits for the bridge to reconnect, and verifies health.
+
+---
+
+## Troubleshooting
+
+### Timer is enabled but inactive / no NEXT time
+
+```bash
+digest --config ./config.yaml schedule status
+systemctl --user status whatsapp-digest-<workflow>.timer --no-pager -l
+journalctl --user -u whatsapp-digest-<workflow>.timer -n 50 --no-pager
+systemd-analyze calendar '<OnCalendar value>'
+```
+
+Healthy timers are enabled, active, and have a real next activation.
+
+### Bridge service active but messages do not appear
+
+Check:
+
+```bash
+digest --config ./config.yaml transport status
+systemctl --user cat whatsapp-digest-bridge.service
+journalctl --user -u whatsapp-digest-bridge.service -n 100 --no-pager
+```
+
+The generated bridge unit should contain:
+
+```text
+WHATSAPP_GROUP_POLICY=allowlist
+WHATSAPP_GROUP_ALLOWED_USERS=<configured group JIDs>
+```
+
+If config group JIDs changed, rerun:
+
+```bash
+digest --config ./config.yaml transport install
+```
+
+### `group_policy_rejected`
+
+The incoming group is not admitted by the bridge allowlist. Confirm its exact `@g.us` JID matches a workflow and reinstall transport.
+
+Do not solve this by setting a globally open group policy.
+
+### Collector cannot reach bridge
+
+Typical log:
+
+```text
+WhatsApp bridge read failed: ... URLError
+```
+
+Check bridge state and port 3001. The collector retries automatically.
+
+### Hermes gateway starts another WhatsApp bridge
+
+Check:
+
+```bash
+grep '^WHATSAPP_ENABLED=' ~/.hermes/.env
+```
+
+It must be:
+
+```text
+WHATSAPP_ENABLED=false
+```
+
+Then restart the normal Hermes gateway.
+
+### `0 messages` with `--last`
+
+`--last` does not query WhatsApp servers. It filters rows already captured in SQLite.
+
+If the bridge/collector was not running, or that group was not allowed at the time, those historical messages do not exist in v2 and cannot be recovered by increasing the window.
+
+### SMTP accepted but email is not visible
+
+Check:
+
+- exact To/Cc printed by `email test`;
+- spam/junk/quarantine;
+- relay/provider message trace;
+- bounce messages to the configured sender.
+
+Application SMTP log:
+
+```bash
+tail -n 100 ./logs/digest.log
+```
+
+### Password works manually but timer fails
+
+The scheduled service does not inherit an arbitrary interactive shell environment. Ensure `digest.env` exists, contains the exact configured `password_env` variable, and is mode 0600.
+
+### Workflow stays NEEDS_INITIAL_RUN
+
+Initialize it manually with `--last` or `--since`. Scheduled execution intentionally refuses to guess the first window.
+
+---
+
+## Data and retention
+
+SQLite stores:
+
+- collected messages/captions;
+- group metadata;
+- per-workflow checkpoint state;
+- run metadata.
+
+It does not serve as a permanent WhatsApp archive.
+
+Processed raw messages older than `retention.processed_raw_days` are purged after successful real workflow runs. Pending rows are preserved regardless of age.
+
+Run history stores metadata, not the rendered digest or full raw source.
+
+Dry-run artifacts are local owner-only files under the database data directory.
+
+---
+
+## Functional limits of v2
+
+Intentionally out of scope:
+
+- WhatsApp historical API/backfill;
+- media OCR/transcription/extraction;
+- WhatsApp outbound replies;
+- multiple workflows for one group;
+- automatic model fallback;
+- cross-day semantic unresolved-question state;
+- permanent raw-message archive;
+- multi-channel delivery beyond email.
+
+Phase 1 handles text and media captions. Media-only placeholders are ignored.
+
+---
+
+## Tests
+
+Primary v2 suite:
+
+```bash
+pytest -q tests/test_v2_*.py
+```
+
+GitHub Actions runs the same v2 suite on pushes/pull requests that change v2 code/config/package files.
+
+Useful pre-merge checks:
+
+```bash
+pytest -q tests/test_v2_*.py
 git diff --check
 git status --short
 ```
 
-These commands do not send WhatsApp messages, invoke model inference, send SMTP, change the gateway, or activate scheduling. Read `HANDOFF.md` before any replay or state-changing operation.
+---
+
+## Shutdown / rollback
+
+Remove scheduled digest timers:
+
+```bash
+digest --config ./config.yaml schedule remove
+```
+
+Remove the dedicated v2 WhatsApp bridge and collector:
+
+```bash
+digest --config ./config.yaml transport remove
+```
+
+These commands do not delete SQLite data or `config.yaml`.
+
+If intentionally returning WhatsApp ownership to the normal Hermes gateway, only do so **after** the v2 transport is stopped; then re-enable `WHATSAPP_ENABLED=true` and restart the Hermes gateway. Never run both WhatsApp consumers simultaneously.
+
+---
+
+## What “done” means for this project
+
+The v2 implementation is complete when all of the following are true:
+
+- v2 tests are green;
+- transport status is healthy;
+- scheduler status is healthy;
+- Hermes gateway WhatsApp is disabled;
+- user lingering is enabled;
+- each production workflow is explicitly initialized;
+- real group messages increase pending counts;
+- a real scheduled/manual digest reaches SMTP and advances the checkpoint only on success.
+
+After that, the remaining activity is a **multi-day quality pilot**: review actual summaries versus the raw attachment for omissions, hallucinations, grouping, attribution, action capture, unanswered questions, and noise. Quality findings should normally be addressed with workflow instructions or prompt tuning before adding new architecture.
