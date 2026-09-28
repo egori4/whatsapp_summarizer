@@ -185,3 +185,21 @@ def test_install_fails_on_unit_verification_error(tmp_path):
             python_executable="/opt/digest/.venv/bin/python",
             executor=fake,
         )
+
+
+def test_render_units_preserves_virtualenv_python_symlink(tmp_path):
+    cfg = make_config(tmp_path)
+    target = tmp_path / "usr-bin-python"
+    target.write_text("", encoding="utf-8")
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(target)
+
+    unit = render_units(
+        cfg,
+        cfg.workflow("daily"),
+        python_executable=venv_python,
+    )
+
+    assert f'ExecStart="{venv_python}" ' in unit.service_text
+    assert f'ExecStart="{target}" ' not in unit.service_text

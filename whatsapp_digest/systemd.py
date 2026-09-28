@@ -84,7 +84,9 @@ def render_units(
     if workflow.schedule is None:
         raise ScheduleError(f"workflow '{workflow.id}' is manual-only")
 
-    python = Path(python_executable or sys.executable).resolve()
+    python = Path(python_executable or sys.executable).expanduser()
+    if not python.is_absolute():
+        python = (Path.cwd() / python).absolute()
     base_name = f"whatsapp-digest-{workflow.id}"
     service_name = f"{base_name}.service"
     timer_name = f"{base_name}.timer"
