@@ -66,10 +66,13 @@ def _quote_exec(value: str | Path) -> str:
     return f'"{text}"'
 
 
-def _escape_environment_file(value: str | Path) -> str:
+def _escape_unit_path(value: str | Path) -> str:
     text = str(value).replace("%", "%%")
-    text = text.replace("\\", "\\x5c").replace(" ", "\\x20")
-    return text
+    return text.replace("\\", "\\x5c").replace(" ", "\\x20")
+
+
+def _escape_environment_file(value: str | Path) -> str:
+    return _escape_unit_path(value)
 
 
 def render_units(
@@ -97,7 +100,7 @@ def render_units(
             "",
             "[Service]",
             "Type=oneshot",
-            f"WorkingDirectory={_quote_exec(config.source_path.parent)}",
+            f"WorkingDirectory={_escape_unit_path(config.source_path.parent)}",
             f"EnvironmentFile=-{_escape_environment_file(env_file)}",
             (
                 "ExecStart="
@@ -160,6 +163,26 @@ def _write_unit(path: Path, content: str) -> None:
     path.chmod(0o644)
 
 
+def _verify_units(
+    paths: list[Path],
+    *,
+    executor: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    if not paths:
+        return
+    try:
+        result = executor(
+            ["systemd-analyze", "--user", "verify", *[str(path) for path in paths]],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise ScheduleError(f"failed to execute systemd-analyze: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "systemd unit verification failed").strip()
+        raise ScheduleError(detail)
+
+
 def install_schedules(
     config: AppConfig,
     *,
@@ -196,9 +219,22 @@ def install_schedules(
             if path.exists():
                 path.unlink()
 
+    unit_paths: list[Path] = []
+    for unit in desired.values():
+        unit_paths.extend([root / unit.service_name, root / unit.timer_name])
+    _verify_units(unit_paths, executor=executor)
+
     _run_systemctl(["daemon-reload"], executor=executor)
     for unit in desired.values():
         _run_systemctl(["enable", "--now", unit.timer_name], executor=executor)
+        active = _run_systemctl(
+            ["is-active", unit.timer_name],
+            executor=executor,
+            check=False,
+        )
+        if active.returncode != 0 or (active.stdout or "").strip() != "active":
+            detail = (active.stderr or active.stdout or "timer did not become active").strip()
+            raise ScheduleError(f"{unit.timer_name} is not active after install: {detail}")
     return list(desired.values())
 
 
@@ -228,14 +264,26 @@ def schedule_status(
                 "schedule": "manual-only",
                 "enabled": "-",
                 "active": "-",
+                "next": "-",
+                "health": "manual-only",
             })
             continue
         unit = render_units(config, workflow)
+        enabled = _unit_state(unit.timer_name, "is-enabled", executor=executor)
+        active = _unit_state(unit.timer_name, "is-active", executor=executor)
+        next_result = _run_systemctl(
+            ["show", unit.timer_name, "--property=NextElapseUSecRealtime", "--value"],
+            executor=executor,
+            check=False,
+        )
+        next_value = (next_result.stdout or "").strip() or "-"
         result.append({
             "workflow_id": workflow.id,
             "schedule": unit.on_calendar,
-            "enabled": _unit_state(unit.timer_name, "is-enabled", executor=executor),
-            "active": _unit_state(unit.timer_name, "is-active", executor=executor),
+            "enabled": enabled,
+            "active": active,
+            "next": next_value,
+            "health": "healthy" if enabled == "enabled" and active == "active" and next_value != "-" else "unhealthy",
         })
     return result
 

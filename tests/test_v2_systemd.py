@@ -77,6 +77,8 @@ def test_rendered_service_uses_same_cli_runner_and_optional_env_file(tmp_path):
     assert "run \"daily\" --scheduled" in unit.service_text
     assert "-m whatsapp_digest.cli" in unit.service_text
     assert str(cfg.source_path) in unit.service_text
+    assert f"WorkingDirectory={cfg.source_path.parent}" in unit.service_text
+    assert f'WorkingDirectory="{cfg.source_path.parent}"' not in unit.service_text
     assert f"EnvironmentFile=-{schedule_env_file(cfg)}" in unit.service_text
     assert "Persistent=true" in unit.timer_text
     assert "America/Toronto" in unit.timer_text
@@ -89,7 +91,9 @@ def test_install_writes_only_scheduled_workflows(tmp_path):
 
     def fake(cmd, **kwargs):
         calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, "active\n", "")
+        if cmd[:3] == ["systemctl", "--user", "is-active"]:
+            return subprocess.CompletedProcess(cmd, 0, "active\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
 
     units = install_schedules(
         cfg,
@@ -101,6 +105,7 @@ def test_install_writes_only_scheduled_workflows(tmp_path):
     assert (unit_dir / "whatsapp-digest-daily.service").exists()
     assert (unit_dir / "whatsapp-digest-daily.timer").exists()
     assert not (unit_dir / "whatsapp-digest-manual.timer").exists()
+    assert any(cmd[:3] == ["systemd-analyze", "--user", "verify"] for cmd in calls)
     assert ["systemctl", "--user", "daemon-reload"] in calls
     assert ["systemctl", "--user", "enable", "--now", "whatsapp-digest-daily.timer"] in calls
 
@@ -136,3 +141,45 @@ def test_remove_schedules_removes_generated_units(tmp_path):
     removed = remove_schedules(cfg, unit_dir=unit_dir, executor=fake)
     assert removed == ["whatsapp-digest-daily"]
     assert list(unit_dir.iterdir()) == []
+
+
+def test_install_fails_if_timer_does_not_become_active(tmp_path):
+    cfg = make_config(tmp_path)
+    unit_dir = tmp_path / "systemd"
+
+    def fake(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "is-active"]:
+            return subprocess.CompletedProcess(cmd, 3, "inactive\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    from whatsapp_digest.systemd import ScheduleError
+    import pytest
+
+    with pytest.raises(ScheduleError, match="not active after install"):
+        install_schedules(
+            cfg,
+            unit_dir=unit_dir,
+            python_executable="/opt/digest/.venv/bin/python",
+            executor=fake,
+        )
+
+
+def test_install_fails_on_unit_verification_error(tmp_path):
+    cfg = make_config(tmp_path)
+    unit_dir = tmp_path / "systemd"
+
+    def fake(cmd, **kwargs):
+        if cmd[:3] == ["systemd-analyze", "--user", "verify"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "bad unit setting")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    from whatsapp_digest.systemd import ScheduleError
+    import pytest
+
+    with pytest.raises(ScheduleError, match="bad unit setting"):
+        install_schedules(
+            cfg,
+            unit_dir=unit_dir,
+            python_executable="/opt/digest/.venv/bin/python",
+            executor=fake,
+        )
