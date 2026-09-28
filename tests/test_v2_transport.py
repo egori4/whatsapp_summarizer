@@ -137,10 +137,14 @@ def test_install_writes_verifies_enables_and_checks_both_services(tmp_path, monk
     root = tmp_path / "systemd"
     calls = []
 
+    states = iter(["inactive", "inactive", "active", "active"])
+
     def fake(cmd, **kwargs):
         calls.append(cmd)
         if cmd[:3] == ["systemctl", "--user", "is-active"]:
-            return subprocess.CompletedProcess(cmd, 0, "active\n", "")
+            state = next(states)
+            code = 0 if state == "active" else 3
+            return subprocess.CompletedProcess(cmd, code, state + "\n", "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr("whatsapp_digest.transport._wait_bridge_connected", lambda _cfg: None)
