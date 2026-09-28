@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from typing import Callable
 from urllib.request import urlopen
 
@@ -229,6 +230,7 @@ def install_transport(
     _run_systemctl(["daemon-reload"], executor=executor)
     _run_systemctl(["enable", "--now", BRIDGE_SERVICE], executor=executor)
     _active_or_raise(BRIDGE_SERVICE, executor=executor)
+    _wait_bridge_connected(config)
     _run_systemctl(["enable", "--now", COLLECTOR_SERVICE], executor=executor)
     _active_or_raise(COLLECTOR_SERVICE, executor=executor)
     return units
@@ -242,6 +244,27 @@ def _bridge_health(config: AppConfig) -> str:
             return "connected" if b'"status":"connected"' in response.read() else "responding"
     except Exception:
         return "unreachable"
+
+
+def _wait_bridge_connected(
+    config: AppConfig,
+    *,
+    timeout_seconds: float = 20.0,
+    interval_seconds: float = 0.25,
+    health_check: Callable[[AppConfig], str] = _bridge_health,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = "unreachable"
+    while time.monotonic() < deadline:
+        last = health_check(config)
+        if last == "connected":
+            return
+        sleeper(interval_seconds)
+    raise TransportError(
+        f"{BRIDGE_SERVICE} did not become connected within "
+        f"{timeout_seconds:g}s (last health: {last})"
+    )
 
 
 def linger_status(

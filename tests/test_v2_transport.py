@@ -7,6 +7,7 @@ from whatsapp_digest.transport import (
     BRIDGE_SERVICE,
     COLLECTOR_SERVICE,
     TransportError,
+    _wait_bridge_connected,
     discover_transport_paths,
     hermes_whatsapp_enabled,
     install_transport,
@@ -130,7 +131,7 @@ def test_install_refuses_competing_hermes_whatsapp(tmp_path):
         )
 
 
-def test_install_writes_verifies_enables_and_checks_both_services(tmp_path):
+def test_install_writes_verifies_enables_and_checks_both_services(tmp_path, monkeypatch):
     cfg = make_config(tmp_path)
     home, *_ = make_hermes(tmp_path)
     root = tmp_path / "systemd"
@@ -141,6 +142,8 @@ def test_install_writes_verifies_enables_and_checks_both_services(tmp_path):
         if cmd[:3] == ["systemctl", "--user", "is-active"]:
             return subprocess.CompletedProcess(cmd, 0, "active\n", "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("whatsapp_digest.transport._wait_bridge_connected", lambda _cfg: None)
 
     units = install_transport(
         cfg,
@@ -191,4 +194,33 @@ def test_install_refuses_unmanaged_bridge_endpoint(tmp_path, monkeypatch):
             unit_dir=tmp_path / "systemd",
             hermes_home=home,
             executor=fake,
+        )
+
+
+def test_wait_bridge_connected_retries_until_ready(tmp_path):
+    cfg = make_config(tmp_path)
+    states = iter(["unreachable", "responding", "connected"])
+    sleeps = []
+
+    _wait_bridge_connected(
+        cfg,
+        timeout_seconds=1,
+        interval_seconds=0.01,
+        health_check=lambda _cfg: next(states),
+        sleeper=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert sleeps == [0.01, 0.01]
+
+
+def test_wait_bridge_connected_fails_closed(tmp_path):
+    cfg = make_config(tmp_path)
+
+    with pytest.raises(TransportError, match="did not become connected"):
+        _wait_bridge_connected(
+            cfg,
+            timeout_seconds=0.001,
+            interval_seconds=0,
+            health_check=lambda _cfg: "unreachable",
+            sleeper=lambda _seconds: None,
         )
