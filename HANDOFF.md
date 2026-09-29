@@ -390,25 +390,20 @@ At handoff time on m920q:
 
 Do not copy secrets, SMTP passwords, tokens, or private group IDs into documentation or tickets.
 
-## 14. Known documentation drift / things not to copy blindly
+## 14. Documentation status and historical context
 
-`V2_ARCHITECTURE_SPEC.md` is the original v2 design document and contains examples that predate the current runtime/configuration. In particular:
+`V2_ARCHITECTURE_SPEC.md` began as the phased v2 implementation specification. It was reconciled on 2026-09-29 with the current v2.1 runtime and now documents the implemented CLI, historical-context behavior, config-upgrade mechanism, named local-provider model selection, current package/branch status, and completed milestones.
 
-- its local provider example uses `provider: ollama`; current m920q uses the named provider `ollama-local`;
-- some cloud-model example names are historical examples rather than the currently selected runtime model;
-- the architecture still contains phased implementation language even though v2 is complete and in production-pilot/quality-observation mode;
-- its replay examples describe an intended interface, but the current CLI has no `replay` command; do not treat those examples as supported operations.
+The milestone history is intentionally retained because it explains why safety/checkpoint boundaries exist, but it should no longer be read as an unfinished implementation plan. The README remains authoritative for operational commands and deployment procedures; current code remains authoritative if any future documentation drift appears.
 
-The README and current code are authoritative for actual commands and provider configuration.
-
-`V2_1_HISTORICAL_CONTEXT_PLAN.md` still says “pending review and live validation” near its header. That wording is now stale: both a live dry-run and a real scheduled digest have been observed successfully. Update that status when doing the next documentation cleanup or before merging/tagging v2.1.
+`V2_1_HISTORICAL_CONTEXT_PLAN.md` has also been updated to reflect that live dry-run and scheduled-digest validation have completed and that the remaining work is quality observation.
 
 ## 15. Recommended next steps
 
 1. **Quality-observe local Qwen 9B.** Run small dry-runs first, then compare one or more real-sized windows against the quality standard demonstrated by `gpt-6-sol`.
 2. **Capture a true cross-checkpoint context case.** Specifically verify that a current short reply such as “Yes” can be grounded by a historical question without re-emitting historical-only material.
 3. **Collect several daily digests before prompt tuning.** Change prompt/schema only for repeated, observable failure patterns.
-4. **Before merging v2.1:** run the full suite, `git diff --check`, review branch diff against `main`, perform a dry-run with the intended production model, and update stale v2.1 plan status text.
+4. **Before merging v2.1:** run the full suite, `git diff --check`, review branch diff against `main`, and perform a dry-run with the intended production model.
 5. **Merge/tag only after quality confidence.** `main` should remain the stable v2.0 baseline until that decision is explicit.
 
 ## 16. Useful commands

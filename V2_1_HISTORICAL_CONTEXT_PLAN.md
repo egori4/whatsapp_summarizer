@@ -1,6 +1,6 @@
 # WhatsApp Technical Digest v2.1 — Historical Context Lookback
 
-**Status:** Implemented on feature branch pending review and live validation  
+**Status:** Implemented on feature branch; live dry-run and scheduled-digest validation completed; quality observation ongoing
 **Baseline:** v2.0.0 (`8082c9a`)
 
 ## Goal
