@@ -37,7 +37,7 @@ In scope:
 - current prompt, historical-context behavior and source records;
 - current semantic/source validator;
 - current timeout, debug capture, delivery and checkpoint semantics;
-- automated tests and a small real-message quality benchmark.
+- automated tests and a small manual real-message quality review.
 
 Out of scope:
 
@@ -133,80 +133,74 @@ runner
   -> render / dry-run or delivery / checkpoint
 ```
 
+This path is not refactored for v2.2.
+
 ### 4.2 New v2.2 Ollama path
 
 ```text
 runner
-  -> configured model gateway router
-       |
-       +-- provider != ollama-local
-       |     -> existing HermesModelGateway (unchanged)
-       |
-       +-- provider == ollama-local
-             -> OllamaStructuredGateway
-             -> private request JSON
-             -> ollama_worker.py in Hermes Python environment
-             -> load effective Hermes config
-             -> resolve providers.ollama-local
-             -> native POST /api/chat with JSON Schema
-             -> extract message.content
-             -> ModelInvocationResult
-             -> existing validate_digest()
-             -> existing render / dry-run or delivery / checkpoint
+  |
+  +-- workflow.model.provider == "ollama-local"
+  |     -> OllamaStructuredGateway
+  |     -> read providers.ollama-local from the Hermes config file
+  |     -> native POST /api/chat with JSON Schema
+  |     -> extract message.content
+  |     -> ModelInvocationResult
+  |
+  +-- every other provider
+        -> existing HermesModelGateway unchanged
+
+ModelInvocationResult
+  -> existing validate_digest()
+  -> existing render / dry-run or delivery / checkpoint
 ```
 
-The two paths converge only at the existing `ModelInvocationResult` / validation boundary.
+The new code ends at the existing `ModelInvocationResult` boundary. Everything after that boundary is shared.
 
 ## 5. Proposed code structure
 
-New files:
+Add one production module:
 
 ```text
 whatsapp_digest/model/
-  router.py
   ollama.py
-  ollama_worker.py
 ```
 
-Existing files changed minimally:
+Change only what is required around it:
 
 ```text
-whatsapp_digest/runner.py
-whatsapp_digest/config.py
+whatsapp_digest/runner.py   # small explicit gateway selection
 README.md
 tests/
-pyproject.toml
+pyproject.toml              # version bump only
 ```
 
-`hermes.py` and `hermes_worker.py` should remain behaviorally unchanged unless a tiny reusable helper can be shared with zero semantic change. Avoid refactoring the stable Hermes path merely to make the new code look symmetrical.
+Do not add a provider router framework or a second worker process for Ollama.
 
-## 6. Gateway routing
+`hermes.py` and `hermes_worker.py` remain behaviorally unchanged. Do not refactor the stable Hermes path merely to make the two implementations symmetrical.
 
-`router.py` owns the explicit selection rule.
-Conceptually:
+## 6. Gateway selection
+
+The existing runner performs one explicit trusted-configuration check:
 
 ```python
-OLLAMA_STRUCTURED_PROVIDER = "ollama-local"
-
-def gateway_for_workflow(config, workflow):
-    if workflow.model["provider"] == OLLAMA_STRUCTURED_PROVIDER:
-        return OllamaStructuredGateway(config)
-    return HermesModelGateway(config)
+if gateway is not None:
+    model_gateway = gateway
+elif workflow.model["provider"] == "ollama-local":
+    model_gateway = OllamaStructuredGateway(config)
+else:
+    model_gateway = HermesModelGateway(config)
 ```
 
-The runner keeps test dependency injection:
+That is intentionally the whole routing design for v2.2.
 
-```python
-model_gateway = gateway or gateway_for_workflow(config, workflow)
-```
+There is no registry, capability system, adapter discovery, provider-name pattern matching, or transport abstraction.
 
-No message content is examined by the router.
-
-The provider key is trusted configuration, not message classification.
+No message content is examined when selecting a gateway. The provider key is trusted workflow configuration and is unrelated to message classification.
 
 ## 7. Ollama configuration contract
 
-v2.2 intentionally supports the existing named provider:
+v2.2 uses the existing named provider in Hermes configuration as the single endpoint source:
 
 ```yaml
 providers:
@@ -218,12 +212,11 @@ providers:
       - qwen3.5:4b
 ```
 
-This remains in Hermes configuration. The digest does not introduce a second Ollama endpoint setting.
+The digest does not introduce a second Ollama endpoint setting.
 
-The Ollama worker runs in the Hermes Python environment and uses Hermes' own effective config loader to obtain the provider definition. This keeps Hermes configuration as the single source of truth.
-The native Ollama URL is derived deterministically from the configured provider URL.
+`OllamaStructuredGateway` reads the Hermes config file directly with the project's existing YAML dependency and retrieves only `providers.ollama-local.api`. The path follows the existing `HERMES_HOME` convention when set, otherwise `~/.hermes/config.yaml`. It does not start Hermes, import Hermes runtime code, or execute a second worker process.
 
-For the current provider:
+The native Ollama URL is derived deterministically from the configured provider URL:
 
 ```text
 configured: http://127.0.0.1:11434/v1
@@ -239,12 +232,14 @@ Implementation requirements:
 - derive the origin (`scheme://netloc`) and append `/api/chat`;
 - never accept an endpoint from WhatsApp/model content.
 
-For v2.2, `provider: ollama-local` requires:
+For the native Ollama path:
 
-- a concrete model name; `name: inherit` is rejected;
-- `reasoning: none`; other reasoning values are rejected for this path.
+- `name` must be a concrete model; `name: inherit` is rejected;
+- `reasoning: none` is accepted;
+- `reasoning: inherit` is accepted and resolves to `none` for this path;
+- explicit `minimal/low/medium/high/xhigh` values are rejected because v2.2 always sends `think: false`.
 
-This avoids silently ignoring trusted configuration while `think: false` is fixed by the structured-output contract.
+Do not validate the model against the optional Hermes provider `models:` list. Ollama itself is authoritative for whether the requested model exists and can be loaded.
 
 ## 8. Prompt and historical-context behavior
 
@@ -300,7 +295,7 @@ If the workflow has configured sections, `section_id` is constrained with an `en
 
 If the workflow has no configured sections, `section_id` remains a bounded string and `title` remains a string, preserving current dynamic-section behavior.
 
-The schema may mirror existing safe count limits such as maximum sections/items, but semantic/source validation remains in `validate_digest()`.
+Keep the schema focused on structural shape. Do not duplicate the application's detailed length/count, participant, source-authorization, URL, or current-vs-context policies in JSON Schema; those remain centralized in `validate_digest()`. The one intentional structural constraint beyond types is that `source_ids` must contain at least one string.
 
 ### 9.1 Deliberately not encoded in JSON Schema
 
@@ -349,27 +344,28 @@ The existing `hermes.timeout_seconds` remains the single model-generation timeou
 
 ## 11. HTTP implementation
 
-Use Python standard-library HTTP from `ollama_worker.py`; do not add an Ollama SDK dependency merely for one POST.
+Use Python standard-library HTTP directly from `ollama.py`; do not add an Ollama SDK dependency or a subprocess merely for one POST.
 
 Recommended primitives:
 
 - `urllib.request.Request`
 - `urllib.request.urlopen`
+- `urllib.parse.urlsplit/urlunsplit`
 - `json.dumps/json.loads`
 
-The parent gateway continues to enforce the overall subprocess timeout.
+`OllamaStructuredGateway` uses the existing `hermes.timeout_seconds` value as the HTTP request timeout.
 
-The worker must:
+The gateway must:
 
-1. load the effective Hermes configuration;
-2. find the exact `providers.ollama-local` mapping;
-3. verify the requested concrete model is permitted when a provider model allowlist exists;
-4. derive the native endpoint;
+1. read the Hermes config file from `HERMES_HOME/config.yaml` or the default `~/.hermes/config.yaml`;
+2. find the exact `providers.ollama-local` mapping and its `api` value;
+3. derive the native endpoint;
+4. build the existing semantic prompt and structural schema;
 5. send the request;
-6. reject non-success HTTP responses with a concise error;
+6. reject HTTP/network errors with a concise model-stage error;
 7. parse the Ollama response envelope;
 8. require a non-empty string at `message.content`;
-9. return only that content plus provider/model/reasoning metadata.
+9. return that content in the existing `ModelInvocationResult`.
 
 Normal logs must never include prompts, source messages or full model output.
 ## 12. Result and validation boundary
@@ -463,60 +459,60 @@ Existing run status and failure-stage fields remain authoritative.
 Do not log message bodies, prompts, JSON Schema contents or raw generated output during normal operation.
 ## 16. Implementation plan
 
-### Phase 1 — Structured transport and deterministic integration
+### Phase 1 — Implement the narrow Ollama path
 
-Goal: implement the separate Ollama path without changing normal Hermes behavior.
+Goal: add one direct structured-output gateway without changing normal Hermes behavior.
 
 Implementation:
 
-1. Add `model/router.py` with exact `ollama-local` routing.
-2. Add config validation for concrete Ollama model + `reasoning: none`.
-3. Add `model/ollama.py` implementing `OllamaStructuredGateway`.
-4. Add `model/ollama_worker.py` executed with the Hermes Python environment.
-5. Reuse existing prompt/source/context construction.
-6. Add workflow-driven schema builder.
-7. Implement native `/api/chat` POST.
-8. Return existing `ModelInvocationResult`.
-9. Change the runner only to obtain its default gateway through the router.
-10. Keep validation/rendering/delivery/checkpoint code unchanged.
-11. Add focused unit/integration tests.
-12. Update README with the explicit Ollama 2.2 contract.
+1. Add `model/ollama.py` implementing `OllamaStructuredGateway`.
+2. Reuse the existing source-record, prompt and historical-context builders.
+3. Read only `providers.ollama-local.api` from the Hermes config file (`HERMES_HOME/config.yaml` when set, otherwise `~/.hermes/config.yaml`).
+4. Add a small workflow-driven structural JSON Schema builder inside `ollama.py` or as a nearby private helper.
+5. Implement the native `/api/chat` request with standard-library HTTP.
+6. Return the existing `ModelInvocationResult`.
+7. Add the small explicit `ollama-local` gateway selection in `runner.py`, preserving injected test gateways.
+8. Keep `HermesModelGateway`, `hermes_worker.py`, validation, rendering, delivery and checkpoint code behaviorally unchanged.
+9. Add focused tests for gateway selection, request shape, schema and error handling.
+10. Update README with the explicit Ollama 2.2 behavior.
 
-Exit criterion: automated tests prove routing, request shape, schema, errors and existing-provider regression behavior.
+Exit criterion: automated tests prove the new path works and all existing-provider behavior remains unchanged.
 
-### Phase 2 — Live validation and quality gate
+### Phase 2 — Prove it with real output
 
-Goal: prove that schema reliability did not hide weak summarization quality.
+Goal: confirm that structural reliability produces a useful digest rather than merely valid JSON.
 
-Implementation/verification:
+Verification:
 
-1. Run a live dry-run with `qwen3.5:9b`.
-2. Confirm native structured generation passes JSON parsing and application validation.
-3. Confirm historical context works on a continuation case.
-4. Inspect raw source attachment against generated digest.
-5. Run the defined representative quality cases.
-6. Record findings before declaring v2.2 ready.
-7. Update architecture/handoff docs with final implementation state.
+1. Run a live dry-run with `qwen3.5:9b` on a representative source window.
+2. Confirm native structured generation passes normal JSON parsing and `validate_digest()`.
+3. Run a continuation case that uses historical context.
+4. Inspect the raw source attachment against the generated digest.
+5. Review two or three representative source windows using the manual semantic checklist in Section 18.
+6. Record any misses or unsupported claims before declaring v2.2 ready.
+7. Update architecture/handoff docs with the final implementation state.
 
-No automatic retry/fallback is added during Phase 2. If quality is insufficient, stop and evaluate model/prompt quality separately rather than hiding it with pipeline complexity.
+Do not build benchmark infrastructure for Phase 2. This is a manual engineering quality gate. No automatic retry/fallback is added if the model performs poorly.
 
 ## 17. Automated test plan
 
-### 17.1 Router regression tests
+### 17.1 Gateway-selection regression tests
 
-- `ollama-local` selects `OllamaStructuredGateway`.
-- `inherit` selects existing `HermesModelGateway`.
-- `openai-codex` selects existing `HermesModelGateway`.
-- another named custom provider selects existing `HermesModelGateway`.
-- provider names that merely contain the text "ollama" do not implicitly route unless exactly configured for this v2.2 path.
-- routing result is independent of all message text.
+- exact `ollama-local` selects `OllamaStructuredGateway`;
+- `inherit` selects the existing `HermesModelGateway`;
+- `openai-codex` selects the existing `HermesModelGateway`;
+- another named provider selects the existing `HermesModelGateway`;
+- gateway selection is independent of all message text;
+- an explicitly injected test gateway still overrides default selection.
 
-### 17.2 Config tests
+### 17.2 Ollama configuration behavior
 
-- `ollama-local + concrete model + reasoning:none` is valid.
-- `ollama-local + name:inherit` is rejected.
-- `ollama-local + reasoning:medium/high/inherit` is rejected for v2.2.
-- non-Ollama provider configuration retains existing validation behavior.
+- `ollama-local + concrete model + reasoning:none` works;
+- `ollama-local + concrete model + reasoning:inherit` resolves to `none`;
+- `ollama-local + name:inherit` fails clearly before an HTTP call;
+- explicit thinking levels such as `low/medium/high/xhigh` fail clearly for this path;
+- missing or malformed `providers.ollama-local.api` fails clearly;
+- non-Ollama workflow configuration retains existing behavior;
 - v2.1 legacy-config compatibility tests remain green.
 
 ### 17.3 Schema tests
@@ -531,7 +527,7 @@ No automatic retry/fallback is added during Phase 2. If quality is insufficient,
 - schema does not contain source-message text.
 - schema does not enumerate runtime source IDs or participant names.
 
-### 17.4 Ollama worker tests
+### 17.4 Ollama gateway tests
 
 Use a local fake HTTP server; CI must not require a real Ollama installation.
 
@@ -545,11 +541,11 @@ Verify:
 - generated schema is supplied through `format`;
 - system and user messages are sent separately;
 - successful envelope extracts `message.content`;
-- HTTP errors become model-stage failures;
+- HTTP/network errors become model-stage failures;
 - invalid JSON envelope fails clearly;
 - empty content fails clearly;
 - missing provider config fails clearly;
-- model allowlist mismatch fails clearly;
+- a model name is passed through to Ollama without maintaining a duplicate allowlist;
 - secrets/source text are not emitted in error messages.
 
 ### 17.5 Runner/integration tests
@@ -572,15 +568,15 @@ The entire existing v2 test suite must remain green.
 
 Add at least one explicit test asserting that the non-Ollama branch invokes `HermesModelGateway` exactly as before. The test should compare behavior, not message keywords.
 
-## 18. Quality benchmark
+## 18. Manual quality gate
 
-Structured JSON is necessary but not sufficient. Before release, review at least three representative real or sanitized windows:
+Structured JSON is necessary but not sufficient. Do not build benchmark infrastructure for v2.2. Before release, manually review at least three representative real or sanitized windows:
 
 1. **Continuation/context case** — a short current reply whose meaning depends on prior processed messages.
 2. **Multi-topic technical case** — several unrelated technical discussions in one source window.
 3. **Noise/acknowledgement case** — useful technical content mixed with conversational chatter and acknowledgements.
 
-The benchmark is semantic, not lexical. There is no expected keyword list.
+The review is semantic, not lexical. There is no expected keyword list, golden-output framework, scoring database, or automated model judge.
 
 For each case review:
 
@@ -596,7 +592,7 @@ For each case review:
 GPT output may be used as a comparison reference, but exact GPT parity is not a release requirement.
 ### Quality acceptance bar
 
-For the benchmark set:
+Across the manually reviewed cases:
 
 - zero critical unsupported claims;
 - zero fabricated commands, versions, paths or URLs;
@@ -628,7 +624,7 @@ v2.2 is done only when all of the following are true:
 14. The complete pre-existing test suite passes.
 15. `git diff --check` is clean.
 16. A real `qwen3.5:9b` dry-run completes through structured output and normal validation.
-17. The representative quality benchmark meets the acceptance bar.
+17. The representative manual quality review meets the acceptance bar.
 18. README documents configuration, expected behavior, errors and troubleshooting.
 19. Architecture/handoff documentation reflects the implemented state.
 20. The feature is reviewed on its own PR before merge.
