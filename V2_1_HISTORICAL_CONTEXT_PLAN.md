@@ -65,7 +65,7 @@ No new storage is introduced. Context reads the existing retained SQLite message
 ## Definition of Done
 
 1. Full v2 unit suite passes.
-2. Configuration defaults to enabled / 48h / 100 messages and can be disabled.
+2. Configuration defaults to enabled / up to 48h / 100 messages when retention allows it, remains backward-compatible with shorter retention, and can be disabled.
 3. Context-only model items are rejected deterministically.
 4. Explicit manual windows retain their existing semantics.
 5. Full live checkpoint-driven dry-run on m920q sees historical context without moving the checkpoint or sending email.
@@ -75,7 +75,7 @@ No new storage is introduced. Context reads the existing retained SQLite message
 
 ## Configuration upgrade compatibility
 
-New optional configuration remains backward-compatible at runtime. v2.1 introduces a lightweight explicit config-upgrade path rather than silently rewriting production YAML:
+New optional configuration remains backward-compatible at runtime. Legacy configs that omit `context:` receive a retention-safe effective default: up to 48h when retention allows it, capped to the retained window when shorter, and disabled when `processed_raw_days` is 0. Explicit `context:` values remain strictly validated. v2.1 introduces a lightweight explicit config-upgrade path rather than silently rewriting production YAML:
 
 ```bash
 digest --config ./config.yaml config validate

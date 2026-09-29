@@ -199,6 +199,33 @@ def test_validation_failure_can_capture_raw_model_output(tmp_path, monkeypatch):
     assert debug_files[0].stat().st_mode & 0o777 == 0o600
 
 
+def test_debug_capture_failure_does_not_mask_validation_failure(tmp_path, monkeypatch):
+    import whatsapp_digest.runner as runner_module
+
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
+
+    invalid = "not valid digest JSON"
+    monkeypatch.setenv("WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT", "1")
+    real_os_open = runner_module.os.open
+
+    def fail_debug_open(path, flags, mode=0o777):
+        if "debug-model-output" in str(path):
+            raise OSError("disk unavailable")
+        return real_os_open(path, flags, mode)
+
+    monkeypatch.setattr(runner_module.os, "open", fail_debug_open)
+
+    with pytest.raises(RunnerError, match="validation failed"):
+        run_workflow(cfg, "tests", last="24h", dry_run=True, now=NOW, gateway=FakeGateway(invalid))
+
+    with DigestDatabase(cfg.database_path) as db:
+        row = db._conn.execute("SELECT status, failure_stage FROM runs ORDER BY started_at DESC LIMIT 1").fetchone()
+        assert row["status"] == "failed"
+        assert row["failure_stage"] == "validation"
+
+
 def test_initialized_run_uses_only_changes_after_checkpoint(tmp_path):
     cfg = make_config(tmp_path)
     with DigestDatabase(cfg.database_path) as db:

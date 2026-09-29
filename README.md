@@ -632,7 +632,7 @@ Omit `schedule` for manual-only workflows.
 
 ### Historical context
 
-By default, normal checkpoint-driven runs include up to 48 hours of already processed messages as read-only context:
+By default, normal checkpoint-driven runs include up to 48 hours of already processed messages as read-only context. For legacy configs that omit the `context:` block, the effective default is automatically capped to the available `retention.processed_raw_days`; with zero processed-message retention, historical context defaults to disabled:
 
 ```yaml
 context:

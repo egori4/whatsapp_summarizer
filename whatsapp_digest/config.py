@@ -32,6 +32,16 @@ OPTIONAL_CONFIG_DEFAULTS: dict[str, Any] = {
 }
 
 
+def _default_context_for_retention(processed_raw_days: int) -> dict[str, Any]:
+    if processed_raw_days <= 0:
+        return {"enabled": False, "lookback": "48h", "max_messages": 100}
+    return {
+        "enabled": True,
+        "lookback": f"{min(48, processed_raw_days * 24)}h",
+        "max_messages": 100,
+    }
+
+
 class ConfigError(ValueError):
     pass
 
@@ -79,9 +89,17 @@ def _merge_missing_defaults(
 
 
 def missing_config_defaults(path: str | Path) -> tuple[str, ...]:
+    cfg = load_config(path)
     _source, root = _read_raw_config(path)
     probe = copy.deepcopy(root)
-    return tuple(_merge_missing_defaults(probe, OPTIONAL_CONFIG_DEFAULTS))
+    defaults = {
+        "context": {
+            "enabled": cfg.context["enabled"],
+            "lookback": cfg.context["lookback"],
+            "max_messages": cfg.context["max_messages"],
+        },
+    }
+    return tuple(_merge_missing_defaults(probe, defaults))
 
 
 def _next_backup_path(source: Path) -> Path:
@@ -97,20 +115,34 @@ def _next_backup_path(source: Path) -> Path:
 
 
 def upgrade_config(path: str | Path, *, apply: bool = False) -> ConfigUpgradeResult:
-    # Validate the existing file first; older configs remain valid through runtime defaults.
-    load_config(path)
+    # Validate first, then materialize the exact effective runtime defaults.
+    cfg = load_config(path)
     source, root = _read_raw_config(path)
     upgraded = copy.deepcopy(root)
-    added = tuple(_merge_missing_defaults(upgraded, OPTIONAL_CONFIG_DEFAULTS))
+    defaults = {
+        "context": {
+            "enabled": cfg.context["enabled"],
+            "lookback": cfg.context["lookback"],
+            "max_messages": cfg.context["max_messages"],
+        },
+    }
+    added = tuple(_merge_missing_defaults(upgraded, defaults))
     if not added:
         return ConfigUpgradeResult(source, None, None, (), apply)
 
     output = source.with_name(source.name + ".upgraded")
-    output.write_text(
-        yaml.safe_dump(upgraded, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    os.chmod(output, source.stat().st_mode & 0o777)
+    payload = yaml.safe_dump(upgraded, sort_keys=False, allow_unicode=True)
+    source_mode = source.stat().st_mode & 0o777
+    # Keep the candidate private while writing; widen only afterward if the source
+    # itself is intentionally more permissive.
+    try:
+        output.unlink()
+    except FileNotFoundError:
+        pass
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(payload)
+    os.chmod(output, source_mode)
     # Validate the generated candidate before it can replace the active configuration.
     load_config(output)
 
@@ -329,7 +361,12 @@ def load_config(path: str | Path) -> AppConfig:
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timezone = _timezone(defaults.get("timezone", "America/Toronto"), "defaults.timezone")
 
-    context_defaults = OPTIONAL_CONFIG_DEFAULTS["context"]
+    context_explicit = "context" in root
+    context_defaults = (
+        OPTIONAL_CONFIG_DEFAULTS["context"]
+        if context_explicit
+        else _default_context_for_retention(processed_raw_days)
+    )
     context_raw = _mapping(root.get("context", {}), "context")
     context_enabled = context_raw.get("enabled", context_defaults["enabled"])
     if not isinstance(context_enabled, bool):
