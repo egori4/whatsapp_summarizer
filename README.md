@@ -451,6 +451,108 @@ Overrides may be set when supported by the installed Hermes runtime.
 
 The run output records the actual provider, model, and reasoning used.
 
+#### Switching models
+
+The digest does not maintain its own provider registry. Model selection must match the installed Hermes configuration on the host. The authoritative file is normally:
+
+```bash
+~/.hermes/config.yaml
+```
+
+Inspect it with:
+
+```bash
+less ~/.hermes/config.yaml
+```
+
+The important sections are:
+
+```yaml
+model:
+  default: gpt-6-sol
+  provider: openai-codex
+
+providers:
+  ollama-local:
+    api: http://127.0.0.1:11434/v1
+    transport: chat_completions
+    models:
+      - qwen3.5:9b
+      - qwen3.5:4b
+
+model_aliases:
+  local-qwen9b:
+    model: qwen3.5:9b
+    provider: ollama-local
+  local-qwen4b:
+    model: qwen3.5:4b
+    provider: ollama-local
+```
+
+To use the Hermes default model/provider, keep the workflow inherited:
+
+```yaml
+model:
+  provider: inherit
+  name: inherit
+  reasoning: inherit
+```
+
+To use a named local Ollama provider, set the workflow to the **provider name under `providers:`** and the **real model name**, for example:
+
+```yaml
+model:
+  provider: ollama-local
+  name: qwen3.5:9b
+  reasoning: inherit
+```
+
+For the smaller local model:
+
+```yaml
+model:
+  provider: ollama-local
+  name: qwen3.5:4b
+  reasoning: inherit
+```
+
+The digest currently does **not** resolve Hermes `model_aliases`. Aliases such as `local-qwen9b` are convenient for interactive Hermes commands such as `/model local-qwen9b`, but the digest workflow should use the concrete pair:
+
+```text
+provider: ollama-local
+name: qwen3.5:9b
+```
+
+Do not use this combination for the named provider above:
+
+```yaml
+model:
+  provider: custom
+  name: local-qwen9b
+```
+
+Bare `custom` does not identify which named custom provider/endpoint Hermes should use, and the alias is not expanded by the digest worker. A typical failure is:
+
+```text
+provider 'custom' resolved without credentials
+```
+
+For another local model/provider, use the same rule:
+
+1. Confirm the model is installed, for example with `ollama list`.
+2. Confirm the corresponding named provider and endpoint under `providers:` in `~/.hermes/config.yaml`.
+3. Use that provider key and the concrete model name in the workflow `model:` block.
+4. Validate the YAML and perform a dry run before using it in a scheduled digest.
+
+Example verification:
+
+```bash
+digest --config ./config.yaml config validate
+digest --config ./config.yaml run global-ps --last 2h --dry-run
+```
+
+`config validate` checks the digest configuration shape; the dry run is what verifies that Hermes can actually resolve and call the selected provider/model. For slower local models, start with a small window such as `--last 2h` before testing a larger source window.
+
 ### WhatsApp
 
 ```yaml
