@@ -6,6 +6,27 @@ It continuously collects messages from explicitly configured WhatsApp groups, st
 
 It is **not** a conversational WhatsApp bot and it never sends messages back to WhatsApp.
 
+## Table of contents
+
+- [Status](#status)
+- [Architecture](#architecture)
+- [Safety model](#safety-model)
+- [Prerequisites](#prerequisites)
+- [Initial installation](#initial-installation)
+- [Configuration](#configuration)
+- [CLI reference](#cli-reference)
+- [Dry-runs](#dry-runs)
+- [Run statuses](#run-statuses)
+- [Routine operations](#routine-operations)
+- [Changing configuration](#changing-configuration)
+- [Updating, switching branches, and applying changes](#updating-switching-branches-and-applying-changes)
+- [Troubleshooting](#troubleshooting)
+- [Data and retention](#data-and-retention)
+- [Functional limits of v2](#functional-limits-of-v2)
+- [Tests](#tests)
+- [Shutdown / rollback](#shutdown--rollback)
+- [What “done” means for this project](#what-done-means-for-this-project)
+
 ## Status
 
 **Version:** 2.1.0
