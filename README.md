@@ -715,6 +715,30 @@ Dry-runs:
 - never initialize a workflow;
 - never advance a checkpoint.
 
+### Debugging raw model output
+
+Model responses are normally not written to disk. If a model call completes but the returned content fails digest validation, you can temporarily enable raw-response capture for that run:
+
+```bash
+WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT=1 \
+  digest --config ./config.yaml run global-ps --last 2d --dry-run
+```
+
+On a validation failure, the exact raw model response is written as an owner-only (`0600`) text file under the configured data directory:
+
+```text
+<data-directory>/debug-model-output/<run-id>.txt
+```
+
+For the default configuration this is `./data/debug-model-output/`. The application also logs the saved file path at warning level. Inspect the newest capture with, for example:
+
+```bash
+ls -lt ./data/debug-model-output/
+less ./data/debug-model-output/<run-id>.txt
+```
+
+This switch is intended only for troubleshooting model formatting/schema problems. The captured response can contain source-derived WhatsApp content, so keep the file private and remove it when it is no longer needed. Capture occurs only after model generation succeeds and validation fails; generation errors, provider failures, and model timeouts do not produce a raw-response file because no completed model response is available. Enabling capture does not change validation, delivery, or checkpoint behavior.
+
 ---
 
 ## Run statuses

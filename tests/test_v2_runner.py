@@ -182,6 +182,23 @@ def test_validation_failure_does_not_move_checkpoint(tmp_path):
         assert state["checkpoint_seq"] is None
 
 
+def test_validation_failure_can_capture_raw_model_output(tmp_path, monkeypatch):
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
+
+    invalid = "not valid digest JSON"
+    monkeypatch.setenv("WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT", "1")
+
+    with pytest.raises(RunnerError, match="validation failed"):
+        run_workflow(cfg, "tests", last="24h", dry_run=True, now=NOW, gateway=FakeGateway(invalid))
+
+    debug_files = list((cfg.database_path.parent / "debug-model-output").glob("*.txt"))
+    assert len(debug_files) == 1
+    assert debug_files[0].read_text(encoding="utf-8") == invalid
+    assert debug_files[0].stat().st_mode & 0o777 == 0o600
+
+
 def test_initialized_run_uses_only_changes_after_checkpoint(tmp_path):
     cfg = make_config(tmp_path)
     with DigestDatabase(cfg.database_path) as db:

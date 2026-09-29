@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 import re
 from string import Formatter
 from typing import Any
@@ -337,6 +338,16 @@ def _run_workflow_unlocked(
             )
         except DigestValidationError as exc:
             reason = str(exc)
+
+            if os.environ.get("WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT") == "1":
+                debug_dir = config.database_path.parent / "debug-model-output"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                debug_path = debug_dir / f"{run_id}.txt"
+                fd = os.open(debug_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(model_result.raw_output)
+                logger.warning("[%s] raw model output saved to %s", workflow.id, debug_path)
+
             db.finish_run(
                 run_id,
                 status="failed",
