@@ -39,6 +39,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
 
 For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
+For the current engineering state, decisions, quality evidence, and next steps, see [HANDOFF.md](HANDOFF.md).
 
 > Some older files in this repository describe the previous v1 architecture. For v2 deployment and operations, this README and `V2_ARCHITECTURE_SPEC.md` are authoritative.
 
