@@ -100,3 +100,17 @@ def test_retention_purges_only_processed_old_messages(tmp_path):
         removed = db.purge_processed_messages({"wf": "123-456@g.us"}, 7)
         assert removed == 1
         assert db.pending_count("wf", "123-456@g.us") == 1
+
+
+def test_context_selects_only_processed_recent_usable_and_caps_newest(tmp_path):
+    with DigestDatabase(tmp_path / "db.sqlite") as db:
+        for mid, when, text in [
+            ("old", "2026-09-24T12:00:00+00:00", "old"),
+            ("c1", "2026-09-27T12:00:00+00:00", "one"),
+            ("c2", "2026-09-27T13:00:00+00:00", "two"),
+            ("pending", "2026-09-27T14:00:00+00:00", "new"),
+        ]:
+            db.upsert_message(message_id=mid, group_jid="123-456@g.us", sender_id=None, display_name="User", occurred_at=when, text=text)
+        db.set_checkpoint("wf", 3)
+        rows = db.select_context("123-456@g.us", 3, "2026-09-26T15:00:00+00:00", 1)
+        assert [row["message_id"] for row in rows] == ["c2"]

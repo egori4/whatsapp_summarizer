@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, missing_config_defaults, upgrade_config
 from .database import DigestDatabase
 from .collector import WhatsAppCollector
 from .delivery.base import DeliveryError
@@ -37,6 +37,8 @@ def _parser() -> argparse.ArgumentParser:
     config = sub.add_parser("config")
     config_sub = config.add_subparsers(dest="config_command", required=True)
     config_sub.add_parser("validate")
+    config_upgrade = config_sub.add_parser("upgrade")
+    config_upgrade.add_argument("--apply", action="store_true", help="Back up and replace the active config after validation")
 
     status = sub.add_parser("status")
     status.add_argument("workflow", nargs="?", help="Optional workflow ID")
@@ -82,6 +84,29 @@ def _cmd_validate(path: str) -> int:
     cfg = load_config(path)
     print(f"Configuration valid: {cfg.source_path}")
     print(f"Workflows: {len(cfg.workflows)}")
+    missing = missing_config_defaults(path)
+    if missing:
+        print("Optional defaults not explicitly present:")
+        for key in missing:
+            print(f"  {key}")
+        print(f"Run: digest --config {path} config upgrade")
+    return 0
+
+
+def _cmd_config_upgrade(path: str, *, apply: bool) -> int:
+    result = upgrade_config(path, apply=apply)
+    if not result.added:
+        print("Configuration already contains all current optional defaults.")
+        return 0
+    print("Added missing defaults:")
+    for key in result.added:
+        print(f"  {key}")
+    if result.applied:
+        print(f"Applied: {result.source_path}")
+        print(f"Backup: {result.backup_path}")
+    else:
+        print(f"Review: {result.output_path}")
+        print(f"Apply with: digest --config {path} config upgrade --apply")
     return 0
 
 
@@ -326,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "config" and args.config_command == "validate":
             return _cmd_validate(args.config)
+        if args.command == "config" and args.config_command == "upgrade":
+            return _cmd_config_upgrade(args.config, apply=args.apply)
         if args.command == "status":
             return _cmd_status(args.config, args.workflow)
         if args.command == "whatsapp" and args.whatsapp_command == "groups":

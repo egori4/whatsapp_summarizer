@@ -184,3 +184,127 @@ def test_unsafe_workflow_id_rejected(tmp_path, workflow_id):
     body = BASE.replace("id: global-ps", f"id: {workflow_id}")
     with pytest.raises(ConfigError, match="letters, numbers"):
         load_config(write_config(tmp_path, body))
+
+
+def test_context_defaults_enabled_48h(tmp_path):
+    cfg = load_config(write_config(tmp_path))
+    assert cfg.context == {
+        "enabled": True,
+        "lookback": "48h",
+        "lookback_seconds": 48 * 3600,
+        "max_messages": 100,
+    }
+
+
+def test_legacy_config_with_one_day_retention_gets_safe_context_default(tmp_path):
+    body = BASE.replace("processed_raw_days: 7", "processed_raw_days: 1")
+    cfg = load_config(write_config(tmp_path, body))
+    assert cfg.context == {
+        "enabled": True,
+        "lookback": "24h",
+        "lookback_seconds": 24 * 3600,
+        "max_messages": 100,
+    }
+
+
+def test_legacy_config_with_zero_retention_disables_context_by_default(tmp_path):
+    body = BASE.replace("processed_raw_days: 7", "processed_raw_days: 0")
+    cfg = load_config(write_config(tmp_path, body))
+    assert cfg.context["enabled"] is False
+    assert cfg.context["lookback"] == "48h"
+
+
+def test_context_can_be_disabled_and_customized(tmp_path):
+    body = BASE.replace(
+        "defaults:\n  timezone: America/Toronto",
+        "context:\n  enabled: false\n  lookback: 3d\n  max_messages: 150\ndefaults:\n  timezone: America/Toronto",
+    )
+    cfg = load_config(write_config(tmp_path, body))
+    assert cfg.context["enabled"] is False
+    assert cfg.context["lookback"] == "3d"
+    assert cfg.context["max_messages"] == 150
+
+
+def test_explicit_context_remains_strict_with_short_retention(tmp_path):
+    body = BASE.replace("processed_raw_days: 7", "processed_raw_days: 1").replace(
+        "defaults:\n  timezone: America/Toronto",
+        "context:\n  enabled: true\n  lookback: 48h\ndefaults:\n  timezone: America/Toronto",
+    )
+    with pytest.raises(ConfigError, match="exceeds retention"):
+        load_config(write_config(tmp_path, body))
+
+
+def test_context_lookback_cannot_exceed_retention(tmp_path):
+    body = BASE.replace(
+        "defaults:\n  timezone: America/Toronto",
+        "context:\n  enabled: true\n  lookback: 8d\ndefaults:\n  timezone: America/Toronto",
+    )
+    with pytest.raises(ConfigError, match="exceeds retention"):
+        load_config(write_config(tmp_path, body))
+
+
+def test_missing_config_defaults_reports_context_keys(tmp_path):
+    from whatsapp_digest.config import missing_config_defaults
+    path = write_config(tmp_path)
+    assert missing_config_defaults(path) == (
+        'context.enabled', 'context.lookback', 'context.max_messages'
+    )
+
+
+def test_config_upgrade_materializes_retention_safe_legacy_defaults(tmp_path):
+    import yaml
+    from whatsapp_digest.config import upgrade_config
+
+    one_day = write_config(tmp_path, BASE.replace("processed_raw_days: 7", "processed_raw_days: 1"))
+    result = upgrade_config(one_day)
+    upgraded = yaml.safe_load(result.output_path.read_text())
+    assert upgraded["context"] == {"enabled": True, "lookback": "24h", "max_messages": 100}
+
+
+def test_config_upgrade_materializes_disabled_context_for_zero_retention(tmp_path):
+    import yaml
+    from whatsapp_digest.config import upgrade_config
+
+    zero_day = write_config(tmp_path, BASE.replace("processed_raw_days: 7", "processed_raw_days: 0"))
+    result = upgrade_config(zero_day)
+    upgraded = yaml.safe_load(result.output_path.read_text())
+    assert upgraded["context"] == {"enabled": False, "lookback": "48h", "max_messages": 100}
+
+
+def test_config_upgrade_writes_review_file_and_preserves_existing_values(tmp_path):
+    import stat
+    import yaml
+    from whatsapp_digest.config import upgrade_config
+    body = BASE.replace(
+        'defaults:\n  timezone: America/Toronto',
+        'context:\n  lookback: 24h\ndefaults:\n  timezone: America/Toronto',
+    )
+    path = write_config(tmp_path, body)
+    original = path.read_text()
+    path.chmod(0o600)
+    result = upgrade_config(path)
+    assert result.applied is False
+    assert result.output_path == path.with_name('config.yaml.upgraded')
+    assert result.backup_path is None
+    assert result.added == ('context.enabled', 'context.max_messages')
+    upgraded = yaml.safe_load(result.output_path.read_text())
+    assert upgraded['context'] == {'lookback': '24h', 'enabled': True, 'max_messages': 100}
+    assert stat.S_IMODE(result.output_path.stat().st_mode) == 0o600
+    assert path.read_text() == original
+
+
+def test_config_upgrade_apply_backs_up_and_is_idempotent(tmp_path):
+    import yaml
+    from whatsapp_digest.config import upgrade_config, missing_config_defaults
+    path = write_config(tmp_path)
+    original = path.read_text()
+    result = upgrade_config(path, apply=True)
+    assert result.applied is True
+    assert result.backup_path is not None
+    assert result.backup_path.read_text() == original
+    upgraded = yaml.safe_load(path.read_text())
+    assert upgraded['context'] == {'enabled': True, 'lookback': '48h', 'max_messages': 100}
+    assert missing_config_defaults(path) == ()
+    again = upgrade_config(path, apply=True)
+    assert again.added == ()
+    assert again.backup_path is None

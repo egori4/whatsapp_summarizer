@@ -6,9 +6,30 @@ It continuously collects messages from explicitly configured WhatsApp groups, st
 
 It is **not** a conversational WhatsApp bot and it never sends messages back to WhatsApp.
 
+## Table of contents
+
+- [Status](#status)
+- [Architecture](#architecture)
+- [Safety model](#safety-model)
+- [Prerequisites](#prerequisites)
+- [Initial installation](#initial-installation)
+- [Configuration](#configuration)
+- [CLI reference](#cli-reference)
+- [Dry-runs](#dry-runs)
+- [Run statuses](#run-statuses)
+- [Routine operations](#routine-operations)
+- [Changing configuration](#changing-configuration)
+- [Updating, switching branches, and applying changes](#updating-switching-branches-and-applying-changes)
+- [Troubleshooting](#troubleshooting)
+- [Data and retention](#data-and-retention)
+- [Functional limits of v2](#functional-limits-of-v2)
+- [Tests](#tests)
+- [Shutdown / rollback](#shutdown--rollback)
+- [What “done” means for this project](#what-done-means-for-this-project)
+
 ## Status
 
-**Version:** 2.0.0  
+**Version:** 2.1.0
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
@@ -18,6 +39,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
 
 For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
+For the current engineering state, decisions, quality evidence, and next steps, see [HANDOFF.md](HANDOFF.md).
 
 > Some older files in this repository describe the previous v1 architecture. For v2 deployment and operations, this README and `V2_ARCHITECTURE_SPEC.md` are authoritative.
 
@@ -115,7 +137,7 @@ After pairing, disable WhatsApp in the normal Hermes gateway as described below.
 ```bash
 git clone https://github.com/egori4/whatsapp_summarizer.git
 cd whatsapp_summarizer
-git checkout v2-workflow-rebuild
+git checkout main
 ```
 
 ### 2. Create the virtual environment
@@ -126,6 +148,8 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
 ```
+
+`pip install -e .` installs the project in **editable mode**. The virtual environment records this checkout as the installed `whatsapp-tech-digest` package, so `digest` imports Python code directly from the working tree instead of from a copied package. This means switching branches or editing Python source changes what the next `digest` process runs. Re-run `pip install -e .` when dependencies or package metadata/version change, or after recreating the virtual environment.
 
 Validate the code:
 
@@ -146,6 +170,20 @@ Validate it:
 ```bash
 digest --config ./config.yaml config validate
 ```
+
+Older valid configs continue to run with built-in defaults for newly introduced optional settings. If validation reports optional defaults that are not explicitly present, generate a reviewable upgraded copy:
+
+```bash
+digest --config ./config.yaml config upgrade
+```
+
+This writes `config.yaml.upgraded` and never modifies the active file. Existing values always win; only missing known defaults are added. Review the generated file, then apply deliberately with:
+
+```bash
+digest --config ./config.yaml config upgrade --apply
+```
+
+`--apply` validates the generated configuration, creates a numbered backup such as `config.yaml.bak` / `config.yaml.bak.1`, and then replaces the active file. Re-running upgrade after all defaults are present is a no-op. Because PyYAML writes the upgraded copy, comments and hand formatting may be normalized even though configuration values are preserved.
 
 ### 4. Disable WhatsApp inside the normal Hermes gateway
 
@@ -414,6 +452,108 @@ Overrides may be set when supported by the installed Hermes runtime.
 
 The run output records the actual provider, model, and reasoning used.
 
+#### Switching models
+
+The digest does not maintain its own provider registry. Model selection must match the installed Hermes configuration on the host. The authoritative file is normally:
+
+```bash
+~/.hermes/config.yaml
+```
+
+Inspect it with:
+
+```bash
+less ~/.hermes/config.yaml
+```
+
+The important sections are:
+
+```yaml
+model:
+  default: gpt-6-sol
+  provider: openai-codex
+
+providers:
+  ollama-local:
+    api: http://127.0.0.1:11434/v1
+    transport: chat_completions
+    models:
+      - qwen3.5:9b
+      - qwen3.5:4b
+
+model_aliases:
+  local-qwen9b:
+    model: qwen3.5:9b
+    provider: ollama-local
+  local-qwen4b:
+    model: qwen3.5:4b
+    provider: ollama-local
+```
+
+To use the Hermes default model/provider, keep the workflow inherited:
+
+```yaml
+model:
+  provider: inherit
+  name: inherit
+  reasoning: inherit
+```
+
+To use a named local Ollama provider, set the workflow to the **provider name under `providers:`** and the **real model name**, for example:
+
+```yaml
+model:
+  provider: ollama-local
+  name: qwen3.5:9b
+  reasoning: inherit
+```
+
+For the smaller local model:
+
+```yaml
+model:
+  provider: ollama-local
+  name: qwen3.5:4b
+  reasoning: inherit
+```
+
+The digest currently does **not** resolve Hermes `model_aliases`. Aliases such as `local-qwen9b` are convenient for interactive Hermes commands such as `/model local-qwen9b`, but the digest workflow should use the concrete pair:
+
+```text
+provider: ollama-local
+name: qwen3.5:9b
+```
+
+Do not use this combination for the named provider above:
+
+```yaml
+model:
+  provider: custom
+  name: local-qwen9b
+```
+
+Bare `custom` does not identify which named custom provider/endpoint Hermes should use, and the alias is not expanded by the digest worker. A typical failure is:
+
+```text
+provider 'custom' resolved without credentials
+```
+
+For another local model/provider, use the same rule:
+
+1. Confirm the model is installed, for example with `ollama list`.
+2. Confirm the corresponding named provider and endpoint under `providers:` in `~/.hermes/config.yaml`.
+3. Use that provider key and the concrete model name in the workflow `model:` block.
+4. Validate the YAML and perform a dry run before using it in a scheduled digest.
+
+Example verification:
+
+```bash
+digest --config ./config.yaml config validate
+digest --config ./config.yaml run global-ps --last 2h --dry-run
+```
+
+`config validate` checks the digest configuration shape; the dry run is what verifies that Hermes can actually resolve and call the selected provider/model. For slower local models, start with a small window such as `--last 2h` before testing a larger source window.
+
 ### WhatsApp
 
 ```yaml
@@ -490,6 +630,19 @@ The workflow timezone defaults to `defaults.timezone` and may be overridden in t
 
 Omit `schedule` for manual-only workflows.
 
+### Historical context
+
+By default, normal checkpoint-driven runs include up to 48 hours of already processed messages as read-only context. For legacy configs that omit the `context:` block, the effective default is automatically capped to the available `retention.processed_raw_days`; with zero processed-message retention, historical context defaults to disabled:
+
+```yaml
+context:
+  enabled: true
+  lookback: 48h
+  max_messages: 100
+```
+
+Historical context helps resolve continuations and short replies across digest boundaries. It never drives checkpointing and every emitted digest item must cite at least one current message. Set `enabled: false` to disable it. The lookback cannot exceed `retention.processed_raw_days`. Explicit `--last`/`--since` runs do not add extra historical context.
+
 ### Summarization
 
 Each workflow may provide trusted instructions and optional sections:
@@ -561,6 +714,30 @@ Dry-runs:
 - never send email;
 - never initialize a workflow;
 - never advance a checkpoint.
+
+### Debugging raw model output
+
+Model responses are normally not written to disk. If a model call completes but the returned content fails digest validation, you can temporarily enable raw-response capture for that run:
+
+```bash
+WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT=1 \
+  digest --config ./config.yaml run global-ps --last 2d --dry-run
+```
+
+On a validation failure, the exact raw model response is written as an owner-only (`0600`) text file under the configured data directory:
+
+```text
+<data-directory>/debug-model-output/<run-id>.txt
+```
+
+For the default configuration this is `./data/debug-model-output/`. The application also logs the saved file path at warning level. Inspect the newest capture with, for example:
+
+```bash
+ls -lt ./data/debug-model-output/
+less ./data/debug-model-output/<run-id>.txt
+```
+
+This switch is intended only for troubleshooting model formatting/schema problems. The captured response can contain source-derived WhatsApp content, so keep the file private and remove it when it is no longer needed. Capture occurs only after model generation succeeds and validation fails; generation errors, provider failures, and model timeouts do not produce a raw-response file because no completed model response is available. Enabling capture does not change validation, delivery, or checkpoint behavior.
 
 ---
 
@@ -637,6 +814,18 @@ Normal v2 deployment:
 
 ## Changing configuration
 
+### Config schema upgrades
+
+Application releases may introduce new optional configuration keys. Runtime loading remains backward-compatible by applying safe internal defaults, while `config validate` reports defaults that are not explicitly present in the file.
+
+Use:
+
+```bash
+digest --config ./config.yaml config upgrade
+```
+
+to create a non-destructive `config.yaml.upgraded` review file. Use `--apply` only after review. The upgrader is **add-missing-only**: it never replaces an existing user value.
+
 ### Change instructions/model/recipients
 
 Edit `config.yaml`, validate it, and future runs will read the new values:
@@ -671,9 +860,29 @@ If a logical workflow moves to a completely different WhatsApp group, prefer a *
 
 ---
 
-## Updating the application
+## Updating, switching branches, and applying changes
 
-Recommended update procedure:
+The project is installed in editable mode, so source-code changes in the checked-out working tree are picked up by the next `digest` process. You do **not** normally restart long-running services just because runner/model/rendering Python code changed.
+
+### Switch to another branch for testing
+
+```bash
+cd ~/scripts/whatsapp-tech-digest
+git switch <branch>
+git pull
+source .venv/bin/activate
+pip install -e .
+pytest -q tests/test_v2_*.py
+digest --config ./config.yaml config validate
+# If optional defaults are reported:
+digest --config ./config.yaml config upgrade
+```
+
+`pip install -e .` is recommended after a branch switch because the branch may change dependencies or package metadata. If only Python source changed, editable mode already points at the working tree, but reinstalling is cheap and removes ambiguity.
+
+After validation, the next manual or scheduled digest run uses the checked-out branch. Switching the production host's checkout therefore effectively changes the application version used by the next scheduled run.
+
+### Pull updates on the current branch
 
 ```bash
 cd ~/scripts/whatsapp-tech-digest
@@ -681,15 +890,63 @@ git pull
 source .venv/bin/activate
 pip install -e .
 pytest -q tests/test_v2_*.py
-
 digest --config ./config.yaml config validate
-digest --config ./config.yaml transport install
-digest --config ./config.yaml schedule install
+# If optional defaults are reported:
+digest --config ./config.yaml config upgrade
+```
+
+Then apply only the operational actions required by what changed:
+
+| What changed | Required action |
+| --- | --- |
+| Runner/model/validation/renderer Python code only | No service reinstall; next run uses new code |
+| Python dependencies or package metadata/version | `pip install -e .` |
+| `config.yaml` instructions/model/recipients/context/SMTP values | `digest ... config validate`; future runs read the new values |
+| SMTP password or another variable in `digest.env` | Edit `digest.env`, keep mode `600`; no schedule reinstall is normally required |
+| Workflow schedule | `digest ... schedule install` |
+| Workflow/group JID added, removed, or changed | `digest ... transport install` and `digest ... schedule install` |
+| Transport implementation or generated transport-unit logic | `digest ... transport install` |
+| Generated scheduler/service-unit logic | `digest ... schedule install` |
+| Virtual environment recreated | `pip install -e .` |
+
+Useful post-update checks:
+
+```bash
 digest --config ./config.yaml transport status
 digest --config ./config.yaml schedule status
 ```
 
-Re-running `transport install` is safe: it rewrites the managed units, restarts an already-running managed bridge/collector so new settings take effect, waits for the bridge to reconnect, and verifies health.
+Do not routinely reinstall transport or schedules after every code pull. Reinstall only when the relevant generated units, group allowlist, or schedule configuration changed.
+
+### Environment variables
+
+Scheduled services load project-level secrets from `digest.env`. For example:
+
+```text
+WHATSAPP_DIGEST_SMTP_PASSWORD=...
+```
+
+After changing `digest.env`:
+
+```bash
+chmod 600 digest.env
+```
+
+The next newly started scheduled digest process reads the updated file. Manual commands still require the same variable in the current shell environment when SMTP authentication is needed.
+
+### Roll back to production `main`
+
+```bash
+cd ~/scripts/whatsapp-tech-digest
+git switch main
+git pull
+source .venv/bin/activate
+pip install -e .
+pytest -q tests/test_v2_*.py
+digest --config ./config.yaml config validate
+```
+
+As above, reinstall transport or schedules only if the target branch changes those operational definitions.
 
 ---
 

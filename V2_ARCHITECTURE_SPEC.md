@@ -1,11 +1,15 @@
 # WhatsApp Technical Digest v2 — Architecture Specification
 
-**Status:** Approved architecture baseline for phased implementation  
-**Branch:** `v2-workflow-rebuild`  
-**Target:** Linux / Ubuntu  
-**Primary integration:** upstream Hermes + WhatsApp  
-**Phase 1 output:** Email  
+**Status:** Implemented v2 architecture; v2.1 historical-context enhancement is in production-pilot/quality-observation
+**Current feature branch:** `v2.1-historical-context`
+**Stable baseline:** `main` / `v2.0.0` (`8082c9a`)
+**Package version on feature branch:** `2.1.0`
+**Target:** Linux / Ubuntu with systemd user services
+**Primary integration:** upstream Hermes + WhatsApp
+**Delivery:** SMTP email
 **Design priority:** reliable, understandable, workflow-driven automation without reintroducing v1 complexity.
+
+This document began as the v2 implementation specification. It now records the implemented architecture and invariants. For current operational commands and deployment procedures, `README.md` is authoritative. For the current pilot state and caveats, see `HANDOFF.md`.
 
 ---
 
@@ -72,7 +76,7 @@ The digest project contains no outbound WhatsApp delivery path.
 
 Each workflow block maps to one group JID.
 
-A group JID may appear in only one workflow in Phase 1.
+A group JID may appear in only one workflow.
 
 The group may have its own:
 
@@ -85,7 +89,7 @@ The group may have its own:
 
 ### 2.4 One summarization call per run
 
-No pre-classifier, two-stage pipeline, repair call, reconciliation model, or automatic fallback model in Phase 1.
+No pre-classifier, two-stage pipeline, repair call, reconciliation model, or automatic fallback model is implemented.
 
 A run performs at most one summarization LLM call.
 
@@ -107,7 +111,7 @@ Hermes remains responsible for provider connectivity.
 
 ## 3. Repository/configuration model
 
-Phase 1 uses one configuration file:
+The application uses one configuration file:
 
 ```text
 config.yaml
@@ -127,42 +131,44 @@ Recommended repository shape:
 
 ```text
 whatsapp_summarizer/
+├── README.md
+├── HANDOFF.md
+├── V2_ARCHITECTURE_SPEC.md
+├── V2_1_HISTORICAL_CONTEXT_PLAN.md
 ├── config.example.yaml
 ├── config.yaml                 # ignored
 ├── data/                       # ignored
 ├── logs/                       # ignored
-├── .vscode/
-│   └── launch.json
 ├── whatsapp_digest/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── collector.py
 │   ├── config.py
 │   ├── database.py
-│   ├── runner.py
-│   ├── validation.py
-│   ├── renderer.py
-│   ├── raw_export.py
+│   ├── locking.py
 │   ├── logging_setup.py
+│   ├── raw_export.py
+│   ├── renderer.py
+│   ├── runner.py
+│   ├── systemd.py
+│   ├── transport.py
+│   ├── validation.py
 │   ├── model/
-│   │   └── hermes.py
-│   ├── delivery/
-│   │   ├── base.py
-│   │   └── email.py
-│   └── scheduling/
-│       └── systemd.py
-├── hermes_plugin/
-│   └── whatsapp_digest_collector/
+│   │   ├── hermes.py
+│   │   └── hermes_worker.py
+│   └── delivery/
+│       ├── base.py
+│       └── email.py
 ├── tests/
 └── pyproject.toml
 ```
 
-The v1 package may remain during migration for reference; v2 code lives under `whatsapp_digest`.
 
 ---
 
 ## 4. Configuration schema
 
-Illustrative Phase 1 configuration:
+Illustrative current configuration:
 
 ```yaml
 paths:
@@ -172,6 +178,11 @@ paths:
 retention:
   processed_raw_days: 7
   log_days: 30
+
+context:
+  enabled: true
+  lookback: 48h
+  max_messages: 100
 
 hermes:
   command: hermes
@@ -297,33 +308,33 @@ model:
   reasoning: low
 ```
 
-Full cloud override:
+Full provider/model override example:
 
 ```yaml
 model:
   provider: openai-codex
-  name: gpt-5.6-sol
+  name: gpt-6-sol
   reasoning: medium
 ```
 
-Local override:
+Named local provider example from the current m920q pilot:
 
 ```yaml
 model:
-  provider: ollama
+  provider: ollama-local
   name: qwen3.5:9b
   reasoning: inherit
 ```
 
-Ollama/provider endpoints remain Hermes configuration, not digest configuration.
+Provider endpoints remain Hermes configuration, not digest configuration. The digest uses the concrete provider key and concrete model name; it currently does not expand Hermes `model_aliases`. For example, an interactive alias such as `local-qwen9b` may resolve inside Hermes, while the digest should use `provider: ollama-local` plus `name: qwen3.5:9b`.
 
-No automatic fallback model is implemented in Phase 1. The model gateway boundary must make later fallback support straightforward without implementing it prematurely.
+No automatic fallback model is implemented. The model gateway boundary must make later fallback support straightforward without implementing it prematurely.
 
 Every digest reports the resolved runtime values, for example:
 
 ```text
 Provider: openai-codex
-Model: gpt-5.6-sol
+Model: gpt-6-sol
 Reasoning: medium
 ```
 
@@ -434,18 +445,18 @@ For unconfigured groups it MUST NOT store:
 
 The command prints known groups/JIDs so the operator can copy the desired JID into `config.yaml`.
 
-A quiet group will not appear until Hermes/collector observes at least one event from it. Phase 1 does not add a separate WhatsApp history/group-query API solely for discovery.
+A quiet group will not appear until Hermes/collector observes at least one event from it. The current implementation does not add a separate WhatsApp history/group-query API solely for discovery.
 
 ---
 
-## 10. Phase 1 message types
+## 10. Supported message types
 
 Process:
 
 - text;
 - captions exposed as text.
 
-Do not inspect in Phase 1:
+The current implementation does not inspect:
 
 - image pixels;
 - PDF/document bodies;
@@ -453,7 +464,7 @@ Do not inspect in Phase 1:
 - audio/voice;
 - video bodies.
 
-Media extraction is a future phase and must not cause Phase 1 attachment/OCR architecture to be built early.
+Media extraction remains out of scope and must not cause attachment/OCR architecture to be built prematurely.
 
 ---
 
@@ -532,7 +543,7 @@ WhatsApp message ID is the message identity.
 - same ID/same content -> no-op;
 - same ID/changed content -> UPDATE + new `change_seq` if upstream surfaces a changed event.
 
-The current upstream standalone bridge does not expose a dedicated edit/revoke event stream. Phase 1 therefore does **not** promise complete WhatsApp edit/delete tracking and will not patch the bridge to add it.
+The current upstream standalone bridge does not expose a dedicated edit/revoke event stream. The current implementation therefore does **not** promise complete WhatsApp edit/delete tracking and will not patch the bridge to add it.
 
 The database keeps update/delete-capable fields so later upstream support can be consumed without redesign, but production behavior is limited to events actually supplied by the upstream bridge.
 
@@ -556,9 +567,32 @@ Changes arriving after the cutoff stay pending for the next run.
 
 Immediately before delivery, perform a lightweight freshness check. If a source selected for the run changed again or was deleted after the snapshot, fail the run and keep the checkpoint unchanged.
 
+### v2.1 historical context
+
+Normal initialized checkpoint-driven runs may also supply already-processed messages as read-only historical context:
+
+```yaml
+context:
+  enabled: true
+  lookback: 48h
+  max_messages: 100
+```
+
+Selection rules:
+
+- current messages remain `checkpoint_seq < change_seq <= cutoff_seq`;
+- historical context is from the same group and must have `change_seq <= checkpoint_seq`;
+- context is constrained by the configured lookback and newest-message cap;
+- context is then presented chronologically;
+- explicit `--last` / `--since` runs do not add extra checkpoint history;
+- context alone never causes a model call;
+- context does not change current message count, run window, cutoff, initialization, or checkpoint movement.
+
+The prompt labels historical and current records separately. Every emitted digest item must cite at least one **current** source ID; historical source IDs may only support a current item. If prompt size must be reduced, oldest historical context is removed before any current message is sacrificed. Freshness validation covers both current records and historical records actually supplied to the model.
+
 ---
 
-## 14. First run, manual run, dry run, replay
+## 14. First run, manual run, and dry run
 
 A new workflow begins uninitialized.
 
@@ -574,7 +608,7 @@ digest run global-ps --since "2026-09-24 08:00"
 
 After successful delivery, the workflow is initialized and the checkpoint advances to the captured cutoff.
 
-`--last` and `--since` operate only on data already collected locally. Phase 1 does not fetch historical WhatsApp messages on demand.
+`--last` and `--since` operate only on data already collected locally. The application does not fetch historical WhatsApp messages on demand.
 
 ### Normal run
 
@@ -597,15 +631,6 @@ digest run global-ps --last 24h --dry-run
 ```
 
 Dry run may invoke the model and render output but never sends delivery and never advances the checkpoint.
-
-### Replay
-
-```bash
-digest replay global-ps --last 24h
-digest replay global-ps --from "2026-09-20 08:00" --to "2026-09-21 08:00"
-```
-
-Replay never changes the production checkpoint.
 
 ---
 
@@ -643,17 +668,17 @@ delivery:
     attach_raw_messages: true
 ```
 
-When enabled, attach the exact source snapshot supplied to the model as a readable `.txt` file.
+When enabled, attach the exact sanitized source records supplied to the model as a readable `.txt` file.
 
 Purpose: practical summary QA without v1-style sentence provenance.
 
-The attachment includes only the run window, not unrelated history.
+For v2.1 checkpoint-driven runs, the file separates `HISTORICAL CONTEXT — ALREADY PROCESSED` from `CURRENT MESSAGES — ELIGIBLE FOR THIS DIGEST`. Only historical context actually supplied to the model is included.
 
 ---
 
 ## 17. Retention
 
-Configurable globally in Phase 1:
+Configurable globally:
 
 ```yaml
 retention:
@@ -665,7 +690,6 @@ Rules:
 
 - pending/unprocessed changes are never purged due only to age;
 - successfully processed raw messages may be purged after the configured period;
-- replay is available only for still-retained source data;
 - retention does not create a historical archive.
 
 Do not add per-workflow retention unless a real need appears.
@@ -680,11 +704,11 @@ Internal narrow interface:
 DeliveryChannel.send(context, rendered_digest, attachments)
 ```
 
-Phase 1 implements only email.
+The current implementation supports email delivery only.
 
 One workflow email block may contain one or many recipients.
 
-Do not implement simultaneous multi-channel delivery in Phase 1 because partial delivery/retry semantics would add complexity.
+Do not implement simultaneous multi-channel delivery without an explicit design change because partial delivery/retry semantics add complexity.
 
 Future Teams/Slack/webhook modules may be added behind the same delivery boundary.
 
@@ -708,6 +732,7 @@ Provider
 Model
 Reasoning
 Messages processed
+Context count/lookback (when enabled)
 Window
 Run ID
 ```
@@ -736,7 +761,7 @@ Checkpoint advances only after known successful email delivery.
 - record/log failure;
 - cannot rely on the same SMTP path for failure notification.
 
-No automatic model fallback in Phase 1.
+No automatic model fallback is implemented.
 
 Failure notifications contain no raw source content or secrets.
 
@@ -755,8 +780,8 @@ Example:
 ```text
 2026-09-26 08:00:00 INFO [global-ps] run started
 2026-09-26 08:00:00 INFO [global-ps] checkpoint=1842 cutoff=1928
-2026-09-26 08:00:00 INFO [global-ps] selected_messages=67
-2026-09-26 08:00:01 INFO [global-ps] provider=openai-codex model=gpt-5.6-sol reasoning=medium
+2026-09-26 08:00:00 INFO [global-ps] selected_messages=67 pending_changes=67 context_messages=14 context_lookback=48h
+2026-09-26 08:00:01 INFO [global-ps] provider=openai-codex model=gpt-6-sol reasoning=medium
 2026-09-26 08:00:34 INFO [global-ps] validation passed
 2026-09-26 08:00:35 INFO [global-ps] email accepted
 2026-09-26 08:00:35 INFO [global-ps] checkpoint advanced to 1928
@@ -822,15 +847,21 @@ No distributed locking is needed.
 
 ## 24. CLI
 
-Phase 1 target CLI:
+Current CLI surface:
 
 ```text
 digest config validate
+digest config upgrade [--apply]
 
 digest whatsapp groups
 
 digest status
 digest status <workflow>
+
+digest collector once
+digest collector run
+
+digest email test <workflow>
 
 digest run <workflow>
 digest run <workflow> --last 24h
@@ -838,17 +869,22 @@ digest run <workflow> --last 2d
 digest run <workflow> --since "2026-09-25 08:00"
 digest run <workflow> --dry-run
 
-digest replay <workflow> --last 24h
-digest replay <workflow> --from ... --to ...
-
 digest schedule install
 digest schedule status
 digest schedule remove
 
-digest cleanup
+digest transport install
+digest transport status
+digest transport remove
 ```
 
+There is currently **no `replay` command and no standalone `cleanup` command**. Retention cleanup is applied by the normal successful-run path. Historical/manual inspection uses the existing `run --last/--since --dry-run` behavior and does not advance the checkpoint.
+
 Default config path is `./config.yaml`, with an explicit `--config` override.
+
+### Config upgrade compatibility
+
+New optional settings must remain backward-compatible at runtime. `digest config validate` reports missing optional defaults without making an older valid file fail. `digest config upgrade` writes a reviewable `config.yaml.upgraded`; `--apply` validates the candidate, backs up the active file, and then replaces it. The merge is recursive add-missing-only, so existing user values always win. Normal digest execution never rewrites configuration.
 
 ---
 
@@ -923,7 +959,10 @@ Changing the shell current directory must not change application state locations
 - unique section IDs;
 - recipient syntax;
 - non-negative/bounded retention values;
+- historical-context duration/count bounds and lookback not exceeding processed-message retention when enabled;
 - resolvable paths.
+
+Validation also reports newly available optional defaults that are not yet explicit in the YAML so they can be reviewed through `config upgrade`.
 
 Invalid configuration fails loudly. Never silently skip a malformed workflow.
 
@@ -931,20 +970,18 @@ Invalid configuration fails loudly. Never silently skip a malformed workflow.
 
 ## 29. Status
 
-`digest status` reports operational state without source content:
+`digest status` reports operational state without source content. Current output includes workflow identity, initialization state, pending changes, last successful run when available, and schedule:
 
 ```text
-Global PS
+Global PS Technical Digest
+  ID: global-ps
   State: READY
-  Last success: 2026-09-26 08:00
-  Last model: gpt-5.6-sol
-  Pending changes: 0
-  Schedule: daily 08:00 America/Toronto
-
-RE Team
-  State: NEEDS_INITIAL_RUN
-  Pending collected changes: 184
+  Pending changes: 3
+  Last success: 2026-09-29T12:00:01+00:00
+  Schedule: daily 07:30 America/Toronto
 ```
+
+A new workflow reports `NEEDS_INITIAL_RUN` until an explicit initial real run succeeds.
 
 ---
 
@@ -965,8 +1002,10 @@ The automated suite must cover the normal behavior plus explicit security invari
 - monthly schedule validation;
 - model inheritance;
 - partial model override;
-- Ollama override;
-- optional sections.
+- named local/custom provider override;
+- optional sections;
+- context defaults/disable/customization;
+- config upgrade add-missing-only behavior and backup/apply semantics.
 
 ### Collector/security
 
@@ -1007,8 +1046,10 @@ Verify it is serialized only as source data and cannot affect runtime configurat
 
 - first run requires explicit timeframe;
 - initialized run uses checkpoint;
+- initialized run supplies eligible historical context when enabled;
+- explicit `--last` / `--since` runs do not add checkpoint context;
+- every model item must cite at least one current source;
 - dry run never advances;
-- replay never advances;
 - model failure never advances;
 - validation failure never advances;
 - SMTP failure never advances;
@@ -1039,28 +1080,27 @@ No real WhatsApp, model, or SMTP connectivity is required for unit tests.
 
 ---
 
-## 31. Phased implementation and Definition of Done
+## 31. Implemented milestones and Definition of Done
 
-### Phase 0 — clean v2 baseline
+### Milestone 0 — clean v2 baseline — complete
 
 Deliver:
 
-- dedicated v2 branch;
+- dedicated v2 implementation branch;
 - consolidated architecture spec;
 - `config.example.yaml`;
 - v2 package skeleton;
 - VS Code launch configuration;
-- v1 remains intact.
 
 DoD:
 
-- branch exists;
+- implementation branch exists;
 - v2 files do not modify Hermes core;
 - real config/state/log files are ignored;
 - package imports;
 - architecture explicitly defines security boundary.
 
-### Phase 1 — configuration + storage
+### Milestone 1 — configuration + storage — complete
 
 Deliver:
 
@@ -1080,14 +1120,14 @@ Deliver:
 
 DoD:
 
-- all Phase 1 tests pass;
+- configuration/storage tests pass;
 - duplicate IDs/JIDs fail configuration;
 - pending data cannot be purged by retention;
 - discovery rows cannot contain source content;
 - relative paths are independent of process CWD;
-- no network/model/email action occurs in Phase 1 tests.
+- configuration/storage unit tests require no network/model/email action.
 
-### Phase 2 — upstream bridge collector
+### Milestone 2 — upstream bridge collector — complete
 
 Deliver:
 
@@ -1112,7 +1152,7 @@ DoD:
 - collector never calls bridge POST/send/edit/media/typing routes;
 - bridge and collector communicate only over loopback.
 
-### Phase 3 — Hermes model pipeline
+### Milestone 3 — Hermes model pipeline — complete
 
 Deliver:
 
@@ -1141,7 +1181,7 @@ DoD:
 - empty configured sections and a completely empty material result are valid;
 - actual resolved provider/model/reasoning available for report metadata.
 
-### Phase 4 — renderer + raw QA
+### Milestone 4 — renderer + raw QA — complete
 
 Deliver:
 
@@ -1164,7 +1204,7 @@ DoD:
 - dry-run artifact directories are owner-only and artifact files are mode 0600;
 - dry-run still does not initialize or advance the workflow checkpoint.
 
-### Phase 5 — email + checkpoint
+### Milestone 5 — email + checkpoint — complete
 
 Deliver:
 
@@ -1188,9 +1228,9 @@ DoD:
 - raw attachment is included only when the workflow enables it;
 - dry-run still sends no email and never advances checkpoint.
 
-Delivery is intentionally at-least-once: if SMTP accepts an email and the process dies before the local success transaction commits, a later retry may duplicate that digest. Phase 1 accepts this rare edge case rather than rebuilding v1 delivery reconciliation.
+Delivery is intentionally at-least-once: if SMTP accepts an email and the process dies before the local success transaction commits, a later retry may duplicate that digest. The architecture accepts this rare edge case rather than rebuilding v1 delivery reconciliation.
 
-### Phase 6 — scheduling
+### Milestone 6 — scheduling — complete
 
 Deliver:
 
@@ -1212,9 +1252,9 @@ DoD:
 - authenticated SMTP schedule installation requires an owner-only `digest.env`;
 - removing or de-scheduling a workflow removes stale generated timer units.
 
-Phase 6 intentionally schedules digest execution only. The standalone upstream WhatsApp bridge and collector lifecycle remain separate transport concerns. Before Phase 7 is called unattended/production-ready, the pilot must explicitly supervise both so collection survives logout/reboot.
+Scheduling intentionally covers digest execution only. The standalone upstream WhatsApp bridge and collector lifecycle remain separate transport concerns. The bridge and collector are supervised separately so collection survives logout/reboot when user lingering is enabled.
 
-### Phase 7 — supervised transport + pilot/acceptance
+### Milestone 7 — supervised transport + pilot/acceptance — implemented; quality observation ongoing
 
 Before the multi-day pilot, make the proven standalone transport unattended:
 
@@ -1250,11 +1290,32 @@ Evaluate summary vs raw attachment, focusing on:
 
 Prefer instruction/prompt improvements over new deterministic semantic machinery.
 
+### Milestone 8 — v2.1 historical context + config compatibility — implemented; quality observation ongoing
+
+Delivered:
+
+- global historical-context defaults (`enabled: true`, `lookback: 48h`, `max_messages: 100`);
+- already-processed same-group context for normal checkpoint-driven runs;
+- deterministic requirement that every output item cite at least one current source;
+- prompt-budget trimming of oldest context before current messages;
+- freshness checks across model-visible current and context rows;
+- raw QA separation of historical and current records;
+- config validation notices for missing optional defaults;
+- non-destructive `config upgrade` and backup-first `--apply`;
+- documented named-provider model switching for local Ollama/custom providers.
+
+Observed:
+
+- full v2 suite reached 111 passing tests after the context/config-upgrade work;
+- a live m920q dry-run used historical context without delivery or checkpoint movement;
+- a real scheduled 2026-09-29 digest successfully summarized 35 current messages with 2 historical-context records and showed strong quality under `openai-codex / gpt-6-sol`;
+- local `ollama-local / qwen3.5:9b` remains a separate quality/performance experiment and should not inherit the cloud-model quality conclusion.
+
 ---
 
-## 32. Explicit Phase 1 non-goals
+## 32. Explicit current non-goals
 
-Do not implement yet:
+Not currently implemented:
 
 - media extraction/OCR/transcription;
 - multi-channel delivery orchestration;

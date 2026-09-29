@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import copy
+import os
 import re
+import shutil
 from string import Formatter
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -18,10 +21,138 @@ _DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 _REASONING = {"inherit", "none", "minimal", "low", "medium", "high", "xhigh"}
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SUBJECT_FIELDS = {"date", "workflow_name", "workflow_id", "run_id"}
+_DURATION_RE = re.compile(r"^(\d+)([mhd])$", re.IGNORECASE)
+
+OPTIONAL_CONFIG_DEFAULTS: dict[str, Any] = {
+    "context": {
+        "enabled": True,
+        "lookback": "48h",
+        "max_messages": 100,
+    },
+}
+
+
+def _default_context_for_retention(processed_raw_days: int) -> dict[str, Any]:
+    if processed_raw_days <= 0:
+        return {"enabled": False, "lookback": "48h", "max_messages": 100}
+    return {
+        "enabled": True,
+        "lookback": f"{min(48, processed_raw_days * 24)}h",
+        "max_messages": 100,
+    }
 
 
 class ConfigError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ConfigUpgradeResult:
+    source_path: Path
+    output_path: Path | None
+    backup_path: Path | None
+    added: tuple[str, ...]
+    applied: bool
+
+
+def _read_raw_config(path: str | Path) -> tuple[Path, dict[str, Any]]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise ConfigError(f"config file not found: {source}")
+    try:
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"invalid YAML: {exc}") from exc
+    return source, _mapping(raw, "config")
+
+
+def _merge_missing_defaults(
+    target: dict[str, Any],
+    defaults: dict[str, Any],
+    *,
+    prefix: str = "",
+    added: list[str] | None = None,
+) -> list[str]:
+    result = added if added is not None else []
+    for key, default in defaults.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if key not in target:
+            target[key] = copy.deepcopy(default)
+            if isinstance(default, dict):
+                result.extend(f"{path}.{child}" for child in default)
+            else:
+                result.append(path)
+            continue
+        if isinstance(default, dict) and isinstance(target[key], dict):
+            _merge_missing_defaults(target[key], default, prefix=path, added=result)
+    return result
+
+
+def missing_config_defaults(path: str | Path) -> tuple[str, ...]:
+    cfg = load_config(path)
+    _source, root = _read_raw_config(path)
+    probe = copy.deepcopy(root)
+    defaults = {
+        "context": {
+            "enabled": cfg.context["enabled"],
+            "lookback": cfg.context["lookback"],
+            "max_messages": cfg.context["max_messages"],
+        },
+    }
+    return tuple(_merge_missing_defaults(probe, defaults))
+
+
+def _next_backup_path(source: Path) -> Path:
+    candidate = source.with_name(source.name + ".bak")
+    if not candidate.exists():
+        return candidate
+    index = 1
+    while True:
+        candidate = source.with_name(source.name + f".bak.{index}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def upgrade_config(path: str | Path, *, apply: bool = False) -> ConfigUpgradeResult:
+    # Validate first, then materialize the exact effective runtime defaults.
+    cfg = load_config(path)
+    source, root = _read_raw_config(path)
+    upgraded = copy.deepcopy(root)
+    defaults = {
+        "context": {
+            "enabled": cfg.context["enabled"],
+            "lookback": cfg.context["lookback"],
+            "max_messages": cfg.context["max_messages"],
+        },
+    }
+    added = tuple(_merge_missing_defaults(upgraded, defaults))
+    if not added:
+        return ConfigUpgradeResult(source, None, None, (), apply)
+
+    output = source.with_name(source.name + ".upgraded")
+    payload = yaml.safe_dump(upgraded, sort_keys=False, allow_unicode=True)
+    source_mode = source.stat().st_mode & 0o777
+    # Keep the candidate private while writing; widen only afterward if the source
+    # itself is intentionally more permissive.
+    try:
+        output.unlink()
+    except FileNotFoundError:
+        pass
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(payload)
+    os.chmod(output, source_mode)
+    # Validate the generated candidate before it can replace the active configuration.
+    load_config(output)
+
+    if not apply:
+        return ConfigUpgradeResult(source, output, None, added, False)
+
+    backup = _next_backup_path(source)
+    shutil.copy2(source, backup)
+    os.replace(output, source)
+    return ConfigUpgradeResult(source, source, backup, added, True)
 
 
 @dataclass(frozen=True)
@@ -55,6 +186,7 @@ class AppConfig:
     whatsapp: dict[str, Any]
     email: dict[str, Any]
     default_timezone: str
+    context: dict[str, Any]
     workflows: tuple[WorkflowConfig, ...] = field(default_factory=tuple)
 
     def workflow(self, workflow_id: str) -> WorkflowConfig:
@@ -130,6 +262,16 @@ def _validate_emails(values: Any, name: str, *, required: bool) -> list[str]:
             raise ConfigError(f"{name}[{index}] is not a valid email address")
         result.append(email)
     return result
+
+
+def _duration_seconds(value: Any, name: str) -> tuple[str, int]:
+    raw = _nonempty(value, name).lower()
+    match = _DURATION_RE.fullmatch(raw)
+    if not match or int(match.group(1)) <= 0:
+        raise ConfigError(f"{name} must use a positive duration such as 24h, 48h, or 3d")
+    amount = int(match.group(1))
+    seconds = amount * {"m": 60, "h": 3600, "d": 86400}[match.group(2).lower()]
+    return raw, seconds
 
 
 def _validate_subject_template(value: Any, name: str) -> str:
@@ -219,6 +361,31 @@ def load_config(path: str | Path) -> AppConfig:
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timezone = _timezone(defaults.get("timezone", "America/Toronto"), "defaults.timezone")
 
+    context_explicit = "context" in root
+    context_defaults = (
+        OPTIONAL_CONFIG_DEFAULTS["context"]
+        if context_explicit
+        else _default_context_for_retention(processed_raw_days)
+    )
+    context_raw = _mapping(root.get("context", {}), "context")
+    context_enabled = context_raw.get("enabled", context_defaults["enabled"])
+    if not isinstance(context_enabled, bool):
+        raise ConfigError("context.enabled must be boolean")
+    context_lookback, context_seconds = _duration_seconds(context_raw.get("lookback", context_defaults["lookback"]), "context.lookback")
+    context_max_messages = context_raw.get("max_messages", context_defaults["max_messages"])
+    if not isinstance(context_max_messages, int) or isinstance(context_max_messages, bool) or not 1 <= context_max_messages <= 1000:
+        raise ConfigError("context.max_messages must be an integer from 1 to 1000")
+    if context_enabled and context_seconds > processed_raw_days * 86400:
+        raise ConfigError(
+            f"context.lookback ({context_lookback}) exceeds retention.processed_raw_days ({processed_raw_days}d)"
+        )
+    context = {
+        "enabled": context_enabled,
+        "lookback": context_lookback,
+        "lookback_seconds": context_seconds,
+        "max_messages": context_max_messages,
+    }
+
     workflows_raw = root.get("workflows")
     if not isinstance(workflows_raw, list) or not workflows_raw:
         raise ConfigError("workflows must be a non-empty list")
@@ -297,4 +464,4 @@ def load_config(path: str | Path) -> AppConfig:
             email={"to": to, "cc": cc, "attach_raw_messages": attach_raw, "subject": subject},
         ))
 
-    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, tuple(workflows))
+    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows))
