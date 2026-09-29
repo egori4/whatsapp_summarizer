@@ -454,7 +454,7 @@ The run output records the actual provider, model, and reasoning used.
 
 #### Switching models
 
-The digest does not maintain its own provider registry. Model selection must match the installed Hermes configuration on the host. The authoritative file is normally:
+The digest does not maintain a general provider registry. Model selection must match the installed Hermes configuration on the host. The authoritative file is normally:
 
 ```bash
 ~/.hermes/config.yaml
@@ -499,7 +499,15 @@ model:
   reasoning: inherit
 ```
 
-To use a named local Ollama provider, set the workflow to the **provider name under `providers:`** and the **real model name**, for example:
+### Native Ollama structured-output path
+
+When a workflow explicitly uses `provider: ollama-local`, v2.2 bypasses the normal Hermes `AIAgent` generation path and calls the configured Ollama server directly through native `/api/chat` structured output. Every other provider, including `provider: inherit`, continues through the existing Hermes path unchanged.
+
+The Ollama endpoint still comes from the Hermes configuration (`HERMES_HOME/config.yaml` when `HERMES_HOME` is set, otherwise `~/.hermes/config.yaml`). The digest does not create a second endpoint setting and never falls back to a cloud model if local Ollama fails.
+
+For this path the digest sends `stream: false`, `think: false`, `temperature: 0`, and a workflow-derived JSON Schema. The existing `validate_digest()` checks source IDs, participant attribution, URLs, current-vs-historical source rules, and other semantic constraints after generation. There is no automatic repair or retry call.
+
+Set the workflow to the exact provider key and a **real model name**, for example:
 
 ```yaml
 model:
@@ -552,7 +560,7 @@ digest --config ./config.yaml config validate
 digest --config ./config.yaml run global-ps --last 2h --dry-run
 ```
 
-`config validate` checks the digest configuration shape; the dry run is what verifies that Hermes can actually resolve and call the selected provider/model. For slower local models, start with a small window such as `--last 2h` before testing a larger source window.
+`config validate` checks the digest configuration shape; the dry run verifies the selected generation path and model. For `ollama-local`, `name: inherit` is not supported because native Ollama needs a concrete model. `reasoning: none` and `reasoning: inherit` are accepted; both run with thinking disabled. Explicit `minimal`, `low`, `medium`, `high`, or `xhigh` reasoning values are rejected on the native Ollama path. For slower local models, start with a small window such as `--last 2h` before testing a larger source window.
 
 ### WhatsApp
 

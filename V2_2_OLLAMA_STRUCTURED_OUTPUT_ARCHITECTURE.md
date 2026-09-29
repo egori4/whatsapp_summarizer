@@ -1,9 +1,9 @@
 # WhatsApp Technical Digest v2.2 — Ollama Structured Output Architecture
 
-**Status:** Proposed architecture / implementation plan
+**Status:** Implemented on feature branch; automated and live validation complete
 **Branch:** `v2.2-ollama-structured-output`
 **Baseline:** merged v2.1 on `main` (`549e989`)
-**Target package version:** `2.2.0`
+**Package version on feature branch:** `2.2.0`
 **Primary goal:** make explicitly selected local Ollama generation structurally reliable without changing the existing Hermes/OpenAI path.
 
 ## 1. Problem statement
@@ -656,3 +656,68 @@ Ollama thinking control:
 https://ollama.com/blog/thinking
 
 These references define the external API behavior used by the design. The repository tests and runtime validation remain authoritative for application behavior.
+
+## 22. Implementation validation results
+
+Implementation completed on `v2.2-ollama-structured-output` with the simplified design:
+
+- one new production module: `whatsapp_digest/model/ollama.py`;
+- one explicit `ollama-local` gateway selection in `runner.py`;
+- no router framework;
+- no Ollama worker subprocess;
+- no Hermes/OpenAI-path refactor;
+- native `/api/chat` with JSON Schema structured output;
+- existing semantic validation, rendering, freshness, delivery and checkpoint logic unchanged.
+
+### Automated validation
+
+Final local suite:
+
+```text
+138 passed
+git diff --check: clean
+```
+
+Coverage includes native endpoint derivation, request shape, structured schema, `stream:false`, `think:false`, `temperature:0`, HTTP/timeout/envelope errors, explicit model/reasoning rules, exact gateway selection, non-Ollama regression behavior, model-failure checkpoint safety and existing v2/v2.1 tests.
+
+### Live qwen3.5:9b validation
+
+Case 1 — normal checkpoint-driven dry-run:
+
+- 1 current message + 37 historical-context messages;
+- current message was only a thank-you acknowledgement;
+- generation completed in about 149 seconds;
+- structured output passed `validate_digest()`;
+- result correctly contained no material updates;
+- dry-run did not advance the checkpoint or send email.
+
+Case 2 — focused VM profile technical discussion:
+
+- 8 current messages, no historical context;
+- generation completed in about 480 seconds;
+- structured output passed `validate_digest()`;
+- preserved the profile path, custom-profile procedure, reboot requirement and supportability concern;
+- correctly ignored the trailing thank-you;
+- quality caveat: duplicated the same topic into Technical Updates and Actions / Follow-up and kept an already answered question in the questions list.
+
+Case 3 — six-message multi-topic direct gateway/validator review:
+
+- GEL/CLS licensing;
+- software-version PS BP question;
+- Cyber Controller RAM question;
+- AppWall + SecurePath support question;
+- generation completed in about 881 seconds;
+- output passed `validate_digest()`;
+- all material topics were represented with valid source attribution;
+- no fabricated commands, versions, paths or URLs were observed;
+- quality caveat: open questions were duplicated between Technical Updates and Unanswered Technical Questions, and the GEL question was slightly reframed.
+
+### Quality-gate conclusion
+
+The documented release acceptance bar is met: no critical unsupported technical claim was identified, no fabricated commands/versions/paths/URLs were observed, source validation passed, context-only material was not emitted, material topics were represented, and trivial acknowledgement text was not promoted.
+
+The local 9B model is nevertheless editorially weaker than the cloud model. The observed duplication and answered-question handling should be treated as model-quality limitations, not transport/schema defects. v2.2 intentionally does not add repair calls, lexical classifiers, fallback, or Ollama-specific semantic heuristics to mask those weaknesses.
+
+### Remaining DoD item
+
+All implementation/test/documentation DoD items are satisfied except the final repository process item: the feature must still be reviewed on its own PR before merge.
