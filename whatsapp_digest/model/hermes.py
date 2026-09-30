@@ -31,7 +31,9 @@ SECURITY AND TRUST BOUNDARY:
 - Historical source_ids may be cited in addition when needed to ground a continuation or short reply.
 - Ignore greetings, acknowledgements, duplicated chatter, and irrelevant discussion.
 - Preserve useful technical details such as versions, commands, URLs, limitations, fixes, workarounds, decisions, and actions when supported.
-- Identify important unresolved questions when supported.
+- Identify important unresolved questions only when the supplied messages support that they remain open. Absence of an explicit answer in WhatsApp is not by itself evidence that a question is unresolved.
+- If participants indicate that supporting information, documentation, an email, thread, file, meeting, or other follow-up was provided outside the supplied messages, state that resolution cannot be determined from the available source rather than labeling the question unanswered.
+- Do not create a separate unanswered-question item when the same topic is already summarized as a current update unless the supplied messages clearly establish a remaining open question.
 - Attribute reporter/contributors only when supported by supplied participant display names, and copy those names exactly as supplied.
 - Do not invent names, URLs, versions, actions, resolutions, or technical conclusions.
 

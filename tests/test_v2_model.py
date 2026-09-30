@@ -98,6 +98,13 @@ def test_prompt_injection_remains_inside_untrusted_source_json():
     assert "attacker@example.com" not in BASE_SYSTEM_PROMPT
 
 
+
+
+def test_system_prompt_handles_off_channel_follow_up_without_overclaiming_unresolved():
+    assert "Absence of an explicit answer in WhatsApp is not by itself evidence" in BASE_SYSTEM_PROMPT
+    assert "resolution cannot be determined from the available source" in BASE_SYSTEM_PROMPT
+    assert "Do not create a separate unanswered-question item" in BASE_SYSTEM_PROMPT
+
 def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes"
     fake_root = fake_home / "hermes-agent"
