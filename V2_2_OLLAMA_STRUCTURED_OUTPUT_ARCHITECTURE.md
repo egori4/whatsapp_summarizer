@@ -721,3 +721,41 @@ The local 9B model is nevertheless editorially weaker than the cloud model. The 
 ### Remaining DoD item
 
 All implementation/test/documentation DoD items are satisfied except the final repository process item: the feature must still be reviewed on its own PR before merge.
+
+### 2026-09-30 truncation fix
+
+A live `--last 1d` run with 33 messages exposed an Ollama runtime-budget issue that was not visible in the initial smaller acceptance cases.
+
+Observed failure:
+
+- Ollama returned only 1,288 bytes of model content;
+- output ended in the middle of a `source_id` string;
+- application validation correctly rejected it as unterminated JSON;
+- Ollama server logs showed Qwen running with a 4,096-token context despite the model supporting 262,144 tokens;
+- the same run's prompt was already about 6,658 user-prompt characters plus 2,845 system-prompt characters before generation.
+
+Root cause: the native v2.2 request did not explicitly set Ollama context/output budgets, so the local runtime's 4k context could exhaust the available generation space and truncate otherwise schema-constrained JSON.
+
+Fix:
+
+- set `num_ctx: 32768` for the native Ollama digest request;
+- set `num_predict: 4096` to reserve a bounded output budget;
+- inspect Ollama `done_reason`;
+- treat `done_reason: length` as a clear model-stage truncation error with `prompt_eval_count`, `eval_count`, `num_ctx`, and `num_predict` in the diagnostic;
+- log successful `done_reason`, prompt-token count, and output-token count without source content.
+
+Regression coverage verifies both request options and explicit length-truncation handling.
+
+The exact failed command was rerun after the fix:
+
+```bash
+WHATSAPP_DIGEST_DEBUG_MODEL_OUTPUT=1 digest --config ./config.yaml run global-ps --last 1d --dry-run
+```
+
+Result:
+
+- 33 messages processed;
+- Ollama was verified at process level with `-c 32768`;
+- generation completed;
+- structured JSON passed the unchanged application validator;
+- dry-run completed successfully with no checkpoint advance.

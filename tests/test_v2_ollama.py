@@ -135,7 +135,7 @@ def test_gateway_sends_native_structured_request(monkeypatch, tmp_path):
     assert payload["model"] == "qwen3.5:9b"
     assert payload["stream"] is False
     assert payload["think"] is False
-    assert payload["options"] == {"temperature": 0}
+    assert payload["options"] == {"temperature": 0, "num_ctx": 32768, "num_predict": 4096}
     assert payload["format"]["properties"]["sections"]
     assert [message["role"] for message in payload["messages"]] == ["system", "user"]
     assert "CURRENT MESSAGES" in payload["messages"][1]["content"]
@@ -200,6 +200,22 @@ def test_gateway_http_error_is_model_error(monkeypatch, tmp_path):
         write_hermes_config(tmp_path, port, monkeypatch)
         with pytest.raises(HermesGatewayError, match="HTTP error: 503"):
             OllamaStructuredGateway(Cfg()).summarize(workflow(), [ROW])
+
+
+def test_gateway_reports_length_truncation_as_model_error(monkeypatch, tmp_path):
+    envelope = {
+        "message": {"content": '{"sections":[{"section_id":"technical"'},
+        "done_reason": "length",
+        "prompt_eval_count": 3500,
+        "eval_count": 596,
+    }
+    with fake_ollama(raw_body=json.dumps(envelope).encode("utf-8")) as (port, _seen):
+        write_hermes_config(tmp_path, port, monkeypatch)
+        with pytest.raises(HermesGatewayError, match="output was truncated") as exc:
+            OllamaStructuredGateway(Cfg()).summarize(workflow(), [ROW])
+    assert "prompt_eval_count=3500" in str(exc.value)
+    assert "eval_count=596" in str(exc.value)
+    assert "num_ctx=32768" in str(exc.value)
 
 
 def test_gateway_invalid_response_envelope_fails_clearly(monkeypatch, tmp_path):

@@ -26,6 +26,8 @@ from .hermes import (
 
 logger = logging.getLogger(__name__)
 OLLAMA_PROVIDER = "ollama-local"
+OLLAMA_NUM_CTX = 32768
+OLLAMA_NUM_PREDICT = 4096
 _MAX_ENVELOPE_BYTES = MAX_OUTPUT_CHARS * 4
 
 
@@ -156,7 +158,11 @@ class OllamaStructuredGateway:
                 {"role": "user", "content": user_prompt},
             ],
             "format": build_output_schema(workflow),
-            "options": {"temperature": 0},
+            "options": {
+                "temperature": 0,
+                "num_ctx": OLLAMA_NUM_CTX,
+                "num_predict": OLLAMA_NUM_PREDICT,
+            },
         }
         request = Request(
             endpoint,
@@ -177,11 +183,6 @@ class OllamaStructuredGateway:
         except OSError as exc:
             raise HermesGatewayError(f"Ollama request failed: {type(exc).__name__}") from exc
         elapsed = time.monotonic() - started
-        logger.info(
-            "provider=ollama-local model=%s reasoning=none structured_output=true generation_seconds=%.3f",
-            model,
-            elapsed,
-        )
         if len(body) > _MAX_ENVELOPE_BYTES:
             raise HermesGatewayError("Ollama response envelope exceeded safe size")
         try:
@@ -190,6 +191,15 @@ class OllamaStructuredGateway:
             raise HermesGatewayError("Ollama returned an invalid JSON response envelope") from exc
         if not isinstance(envelope, dict):
             raise HermesGatewayError("Ollama response envelope must be a JSON object")
+        done_reason = str(envelope.get("done_reason") or "").strip().lower()
+        prompt_eval_count = envelope.get("prompt_eval_count")
+        eval_count = envelope.get("eval_count")
+        if done_reason == "length":
+            raise HermesGatewayError(
+                "Ollama output was truncated by the generation/context limit "
+                f"(prompt_eval_count={prompt_eval_count}, eval_count={eval_count}, "
+                f"num_ctx={OLLAMA_NUM_CTX}, num_predict={OLLAMA_NUM_PREDICT})"
+            )
         message = envelope.get("message")
         if not isinstance(message, dict):
             raise HermesGatewayError("Ollama response is missing message")
@@ -198,6 +208,15 @@ class OllamaStructuredGateway:
             raise HermesGatewayError("Ollama returned empty model output")
         if len(output) > MAX_OUTPUT_CHARS:
             raise HermesGatewayError("Ollama model output exceeded safe output size")
+        logger.info(
+            "provider=ollama-local model=%s reasoning=none structured_output=true "
+            "generation_seconds=%.3f done_reason=%s prompt_eval_count=%s eval_count=%s",
+            model,
+            elapsed,
+            done_reason or "unknown",
+            prompt_eval_count,
+            eval_count,
+        )
         return ModelInvocationResult(
             raw_output=output,
             provider=OLLAMA_PROVIDER,
