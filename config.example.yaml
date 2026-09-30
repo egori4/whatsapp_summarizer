@@ -44,20 +44,26 @@ workflows:
       reasoning: inherit
     summarization:
       instructions: |
+        The digest is for technical team awareness: known issues, updates, lessons,
+        confirmed guidance, explicit do's/don'ts, and source-backed follow-up.
         Focus on technical problems, troubleshooting, root cause, fixes,
         versions, workarounds, useful commands and links, important
         administrative announcements, explicit actions, and unanswered
         technical questions.
+        Do not invent recommendations or next steps merely because they would be reasonable.
+        Actions and do's/don'ts must be explicitly supported by the conversation.
+        If a discussion responds to a question, include the original question and who asked it when materially useful.
+        If only part of a multi-part question is answered, preserve the unanswered part rather than implying full resolution.
       sections:
         - id: technical_updates
           title: Technical Updates
-          guidance: Technical issues, troubleshooting, fixes, versions and guidance.
+          guidance: Technical issues, troubleshooting, fixes, versions, confirmed guidance, limitations, and material administrative updates.
         - id: actions
           title: Actions / Follow-up
-          guidance: Explicit actions, owners and next steps.
+          guidance: Only explicit requested, assigned, committed, or mandatory follow-up. Do not infer recommended next steps.
         - id: unanswered
           title: Unanswered Technical Questions
-          guidance: Important questions that remain unresolved in this source window.
+          guidance: Important technical questions or sub-questions that the supplied messages clearly leave unresolved. Do not duplicate a topic already fully represented elsewhere unless the unresolved part is materially distinct.
     delivery:
       email:
         to:

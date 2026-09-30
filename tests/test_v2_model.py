@@ -105,6 +105,19 @@ def test_system_prompt_handles_off_channel_follow_up_without_overclaiming_unreso
     assert "resolution cannot be determined from the available source" in BASE_SYSTEM_PROMPT
     assert "Do not create a separate unanswered-question item" in BASE_SYSTEM_PROMPT
 
+
+def test_system_prompt_preserves_evidence_boundaries_for_digest_semantics():
+    assert "Tentative language" in BASE_SYSTEM_PROMPT
+    assert "must not be upgraded into a confirmed conclusion" in BASE_SYSTEM_PROMPT
+    assert 'do not label it "confirmed", "resolved", or equivalent' in BASE_SYSTEM_PROMPT
+    assert "For multi-part questions, evaluate each part independently" in BASE_SYSTEM_PROMPT
+    assert "The actions field is evidence-only" in BASE_SYSTEM_PROMPT
+    assert "Do not turn reasonable recommendations" in BASE_SYSTEM_PROMPT
+    assert "If a topic is only an unresolved question" in BASE_SYSTEM_PROMPT
+    assert "prefer one technical update that preserves the unresolved part" in BASE_SYSTEM_PROMPT
+    assert "Do not treat social responses, reactions, congratulations, thanks" in BASE_SYSTEM_PROMPT
+    assert "Use reported_by for the participant(s) who originated" in BASE_SYSTEM_PROMPT
+
 def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes"
     fake_root = fake_home / "hermes-agent"
