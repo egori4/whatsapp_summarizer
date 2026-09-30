@@ -513,7 +513,7 @@ Set the workflow to the exact provider key and a **real model name**, for exampl
 model:
   provider: ollama-local
   name: qwen3.5:9b
-  reasoning: inherit
+  reasoning: none
 ```
 
 For the smaller local model:
@@ -522,7 +522,7 @@ For the smaller local model:
 model:
   provider: ollama-local
   name: qwen3.5:4b
-  reasoning: inherit
+  reasoning: none
 ```
 
 The digest currently does **not** resolve Hermes `model_aliases`. Aliases such as `local-qwen9b` are convenient for interactive Hermes commands such as `/model local-qwen9b`, but the digest workflow should use the concrete pair:
