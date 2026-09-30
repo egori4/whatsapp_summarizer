@@ -674,11 +674,11 @@ Implementation completed on `v2.2-ollama-structured-output` with the simplified 
 Final local suite:
 
 ```text
-138 passed
+143 passed
 git diff --check: clean
 ```
 
-Coverage includes native endpoint derivation, request shape, structured schema, `stream:false`, `think:false`, `temperature:0`, HTTP/timeout/envelope errors, explicit model/reasoning rules, exact gateway selection, non-Ollama regression behavior, model-failure checkpoint safety and existing v2/v2.1 tests.
+Coverage includes native endpoint derivation, request shape, structured schema, `stream:false`, `think:false`, `temperature:0`, HTTP/timeout/envelope errors, explicit model/reasoning rules, exact gateway selection, non-Ollama regression behavior, model-failure checkpoint safety, native input-budget trimming/failure behavior, and existing v2/v2.1 tests.
 
 ### Live qwen3.5:9b validation
 
@@ -759,3 +759,17 @@ Result:
 - generation completed;
 - structured JSON passed the unchanged application validator;
 - dry-run completed successfully with no checkpoint advance.
+
+### 2026-09-30 silent input-pruning hardening
+
+PR review identified a second context-budget failure mode: Ollama may prune oversized chat input before generation and still return a normal HTTP 200 response. In that case `done_reason` can describe output completion without proving that the original system/user input was preserved. Relying only on output-length detection could therefore allow trusted instructions or earlier current messages to be dropped silently.
+
+The native path now performs a conservative preflight before HTTP:
+
+- keep the common v2 prompt construction and 160k application limit unchanged for Hermes/cloud providers;
+- reserve the configured 4,096-token output budget plus 1,024 tokens of chat-template/special-token headroom inside the 32,768-token Ollama context;
+- use the UTF-8 byte size of the system and user prompt as a conservative upper bound for the deployed byte-fallback tokenizer family;
+- trim historical context oldest-first until the request fits;
+- if the system prompt plus current messages still exceed the native safety budget, fail the model stage before HTTP rather than truncating current messages.
+
+Regression coverage verifies both historical-context trimming and fail-before-HTTP behavior for a current-message prompt that remains below the shared 160k character limit but exceeds the native Ollama safety budget.

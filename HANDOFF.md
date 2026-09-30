@@ -68,7 +68,7 @@ Implemented behavior:
 - existing semantic/source validator retained;
 - existing historical-context, freshness, delivery and checkpoint semantics retained.
 
-Final local automated validation: `138 passed`, with `git diff --check` clean.
+Final local automated validation: `143 passed`, with `git diff --check` clean.
 
 Live `qwen3.5:9b` structured-output testing passed application validation on acknowledgement/context, focused technical, and multi-topic cases. Model-quality caveats remain: duplicate topic placement across sections and answered questions sometimes remain listed as unresolved. These are documented in the v2.2 architecture file and are intentionally not hidden with heuristics or retry machinery.
 

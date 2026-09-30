@@ -19,6 +19,7 @@ from .hermes import (
     MAX_OUTPUT_CHARS,
     HermesGatewayError,
     ModelInvocationResult,
+    build_user_prompt,
     fit_prompt_context,
     source_record,
 )
@@ -28,6 +29,15 @@ logger = logging.getLogger(__name__)
 OLLAMA_PROVIDER = "ollama-local"
 OLLAMA_NUM_CTX = 32768
 OLLAMA_NUM_PREDICT = 4096
+# Conservative tokenizer-independent preflight: input token count cannot exceed
+# its UTF-8 byte count for the byte-fallback tokenizers used by Ollama models.
+# Keep explicit headroom for the chat template and special tokens, then reserve
+# the configured generation budget. This intentionally under-uses some context
+# rather than allowing Ollama to silently prune trusted/system or current input.
+OLLAMA_CHAT_TEMPLATE_TOKEN_RESERVE = 1024
+OLLAMA_MAX_INPUT_UTF8_BYTES = (
+    OLLAMA_NUM_CTX - OLLAMA_NUM_PREDICT - OLLAMA_CHAT_TEMPLATE_TOKEN_RESERVE
+)
 _MAX_ENVELOPE_BYTES = MAX_OUTPUT_CHARS * 4
 
 
@@ -123,6 +133,32 @@ def _resolve_model(workflow: WorkflowConfig) -> tuple[str, str]:
     return model, "none"
 
 
+def _ollama_input_bytes(user_prompt: str) -> int:
+    return len(BASE_SYSTEM_PROMPT.encode("utf-8")) + len(user_prompt.encode("utf-8"))
+
+
+def _fit_ollama_prompt(
+    workflow: WorkflowConfig,
+    current_records: list[dict[str, str]],
+    context_records: list[dict[str, str]],
+) -> tuple[str, list[dict[str, str]]]:
+    user_prompt, context_records = fit_prompt_context(
+        workflow, current_records, context_records
+    )
+    input_bytes = _ollama_input_bytes(user_prompt)
+    while input_bytes > OLLAMA_MAX_INPUT_UTF8_BYTES and context_records:
+        context_records = context_records[1:]
+        user_prompt = build_user_prompt(workflow, current_records, context_records)
+        input_bytes = _ollama_input_bytes(user_prompt)
+    if input_bytes > OLLAMA_MAX_INPUT_UTF8_BYTES:
+        raise HermesGatewayError(
+            "Ollama input exceeds conservative 32k context safety budget "
+            f"({input_bytes} UTF-8 bytes > {OLLAMA_MAX_INPUT_UTF8_BYTES}); "
+            "current messages are not truncated"
+        )
+    return user_prompt, context_records
+
+
 class OllamaStructuredGateway:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -146,7 +182,7 @@ class OllamaStructuredGateway:
             for row in (context_rows or [])
             if (row["text"] or row["caption"]) and not row["deleted"]
         ]
-        user_prompt, context_records = fit_prompt_context(workflow, records, context_records)
+        user_prompt, context_records = _fit_ollama_prompt(workflow, records, context_records)
         model, reasoning = _resolve_model(workflow)
         endpoint = _native_chat_url(_load_ollama_api())
         payload = {

@@ -507,6 +507,8 @@ The Ollama endpoint still comes from the Hermes configuration (`HERMES_HOME/conf
 
 For this path the digest sends `stream: false`, `think: false`, `temperature: 0`, and a workflow-derived JSON Schema. The existing `validate_digest()` checks source IDs, participant attribution, URLs, current-vs-historical source rules, and other semantic constraints after generation. There is no automatic repair or retry call.
 
+The native path also applies a conservative preflight budget below the configured 32k Ollama context. Historical context is trimmed oldest-first when necessary. If the system prompt plus current messages still exceed that safety budget, the run fails before calling Ollama; current messages are never silently pruned to make the request fit.
+
 Set the workflow to the exact provider key and a **real model name**, for example:
 
 ```yaml

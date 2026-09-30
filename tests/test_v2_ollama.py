@@ -154,6 +154,35 @@ def test_gateway_reasoning_inherit_resolves_to_none(monkeypatch, tmp_path):
     assert result.reasoning == "none"
 
 
+def test_gateway_trims_historical_context_to_native_context_budget(monkeypatch, tmp_path):
+    historical = dict(ROW)
+    historical["message_id"] = "h1"
+    historical["text"] = "historical " + ("x" * 30_000)
+    with fake_ollama() as (port, seen):
+        write_hermes_config(tmp_path, port, monkeypatch)
+        result = OllamaStructuredGateway(Cfg()).summarize(
+            workflow(), [ROW], context_rows=[historical]
+        )
+    assert result.context_source_records == ()
+    assert "h1" not in seen["payload"]["messages"][1]["content"]
+    assert "m1" in seen["payload"]["messages"][1]["content"]
+
+
+def test_gateway_rejects_oversized_current_input_before_http(monkeypatch):
+    import whatsapp_digest.model.ollama as ollama_module
+
+    oversized = dict(ROW)
+    oversized["text"] = "x" * 40_000
+    monkeypatch.setattr(
+        ollama_module,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("HTTP must not be called")),
+    )
+    with pytest.raises(HermesGatewayError, match="context safety budget") as exc:
+        OllamaStructuredGateway(Cfg()).summarize(workflow(), [oversized])
+    assert "current messages are not truncated" in str(exc.value)
+
+
 @pytest.mark.parametrize("model,reasoning,match", [
     ("inherit", "none", "concrete"),
     ("qwen3.5:9b", "medium", "reasoning"),
