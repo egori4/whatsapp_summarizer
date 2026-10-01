@@ -120,6 +120,8 @@ def test_system_prompt_preserves_evidence_boundaries_for_digest_semantics():
     assert "Write for a busy technical reader" in BASE_SYSTEM_PROMPT
     assert "remaining practical question" in BASE_SYSTEM_PROMPT
     assert "Do not call out missing option text" in BASE_SYSTEM_PROMPT
+    assert "make the digest item self-contained" in BASE_SYSTEM_PROMPT
+    assert "original issue -> prior state -> current update -> remaining explicit question/action" in BASE_SYSTEM_PROMPT
 
 def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes"

@@ -29,7 +29,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.1.0
+**Version:** 2.3.0
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
@@ -37,6 +37,10 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 **Delivery:** SMTP email
 
 The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
+
+### v2.3 continuity improvement
+
+v2.3 improves cross-digest technical-thread continuity. When a new message continues a previously processed discussion, historical context is used to produce a self-contained update that briefly preserves the original problem/request, important prior state, still-relevant unresolved sub-questions, and the new update. Historical-only material is still not emitted as new content, and every digest item must remain grounded by at least one current message.
 
 For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
 For the current engineering state, decisions, quality evidence, and next steps, see [HANDOFF.md](HANDOFF.md).
