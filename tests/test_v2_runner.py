@@ -147,6 +147,77 @@ def test_first_dry_run_calls_model_once_and_never_initializes_checkpoint(tmp_pat
         assert state["checkpoint_seq"] is None
 
 
+def test_explicit_ollama_local_selects_structured_gateway(tmp_path, monkeypatch):
+    import whatsapp_digest.runner as runner_module
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        CONFIG.replace("provider: inherit", "provider: ollama-local")
+        .replace("name: inherit", "name: qwen3.5:9b")
+        .replace("reasoning: inherit", "reasoning: none"),
+        encoding="utf-8",
+    )
+    cfg = load_config(path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
+
+    selected = FakeGateway()
+    monkeypatch.setattr(runner_module, "OllamaStructuredGateway", lambda config: selected)
+    monkeypatch.setattr(
+        runner_module,
+        "HermesModelGateway",
+        lambda config: (_ for _ in ()).throw(AssertionError("Hermes path must not be selected")),
+    )
+    result = run_workflow(cfg, "tests", last="24h", dry_run=True, now=NOW)
+
+    assert result.status == "dry-run-no-material-updates"
+    assert len(selected.calls) == 1
+
+
+def test_ollama_model_failure_keeps_checkpoint_unchanged(tmp_path, monkeypatch):
+    import whatsapp_digest.runner as runner_module
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        CONFIG.replace("provider: inherit", "provider: ollama-local")
+        .replace("name: inherit", "name: qwen3.5:9b")
+        .replace("reasoning: inherit", "reasoning: none"),
+        encoding="utf-8",
+    )
+    cfg = load_config(path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
+
+    monkeypatch.setattr(runner_module, "OllamaStructuredGateway", lambda config: FailingGateway())
+    with pytest.raises(RunnerError, match="model generation failed"):
+        run_workflow(cfg, "tests", last="24h", dry_run=True, now=NOW)
+
+    with DigestDatabase(cfg.database_path) as db:
+        state = db.workflow_state("tests")
+        assert state["initialized"] == 0
+        assert state["checkpoint_seq"] is None
+
+
+def test_non_ollama_provider_keeps_existing_hermes_gateway(tmp_path, monkeypatch):
+    import whatsapp_digest.runner as runner_module
+
+    cfg = make_config(tmp_path)
+    with DigestDatabase(cfg.database_path) as db:
+        seed(db, "m1", "2026-09-27T14:00:00+00:00", "Technical update")
+
+    selected = FakeGateway()
+    monkeypatch.setattr(runner_module, "HermesModelGateway", lambda config: selected)
+    monkeypatch.setattr(
+        runner_module,
+        "OllamaStructuredGateway",
+        lambda config: (_ for _ in ()).throw(AssertionError("Ollama path must not be selected")),
+    )
+    result = run_workflow(cfg, "tests", last="24h", dry_run=True, now=NOW)
+
+    assert result.status == "dry-run-no-material-updates"
+    assert len(selected.calls) == 1
+
+
 def test_model_failure_does_not_move_checkpoint_and_real_run_notifies(tmp_path):
     cfg = make_config(tmp_path)
     with DigestDatabase(cfg.database_path) as db:

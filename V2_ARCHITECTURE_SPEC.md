@@ -1,11 +1,11 @@
 # WhatsApp Technical Digest v2 — Architecture Specification
 
-**Status:** Implemented v2 architecture; v2.1 historical-context enhancement is in production-pilot/quality-observation
-**Current feature branch:** `v2.1-historical-context`
-**Stable baseline:** `main` / `v2.0.0` (`8082c9a`)
-**Package version on feature branch:** `2.1.0`
+**Status:** Implemented v2 architecture; v2.1 is merged; v2.2 native Ollama structured-output enhancement is implemented on its feature branch
+**Current feature branch:** `v2.2-ollama-structured-output`
+**Stable baseline:** merged v2.1 on `main` (`549e989`)
+**Package version on feature branch:** `2.2.0`
 **Target:** Linux / Ubuntu with systemd user services
-**Primary integration:** upstream Hermes + WhatsApp
+**Primary integration:** upstream Hermes + WhatsApp, with an explicit native Ollama structured-output path for `provider: ollama-local`
 **Delivery:** SMTP email
 **Design priority:** reliable, understandable, workflow-driven automation without reintroducing v1 complexity.
 
@@ -25,8 +25,8 @@ WhatsApp
   -> v2 Python collector (only /messages consumer)
   -> SQLite message buffer
   -> workflow runner
-  -> one Hermes LLM call
-  -> structural validation
+  -> one model call (existing Hermes path, or native Ollama only for explicit `ollama-local`)
+  -> structural + semantic/source validation
   -> renderer
   -> email
   -> checkpoint on success
@@ -99,13 +99,13 @@ If the call or validation fails:
 - the checkpoint stays unchanged;
 - the same pending window is retried later.
 
-### 2.5 Hermes is the model gateway
+### 2.5 Hermes is the default model gateway; Ollama has one explicit exception
 
-The application does not implement OpenAI, Copilot, Anthropic, Ollama, or other provider SDKs.
+For every provider except the exact trusted workflow value `ollama-local`, the application uses the existing Hermes model gateway and Hermes remains responsible for provider connectivity.
 
-It resolves a workflow's requested model settings and invokes Hermes.
+v2.2 adds one narrow exception: an explicitly configured `provider: ollama-local` uses the digest's native Ollama `/api/chat` structured-output gateway. This path exists only to enforce the existing digest JSON shape reliably for local Ollama models; it does not introduce a generic provider framework, fallback, repair call, or alternate validation path.
 
-Hermes remains responsible for provider connectivity.
+See `V2_2_OLLAMA_STRUCTURED_OUTPUT_ARCHITECTURE.md` for the exact boundary and tests.
 
 ---
 

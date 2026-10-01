@@ -17,6 +17,7 @@ from .delivery.base import DeliveryChannel, DeliveryError
 from .delivery.email import EmailDelivery
 from .locking import WorkflowBusyError, workflow_lock
 from .model.hermes import HermesModelGateway, HermesGatewayError, ModelInvocationResult, source_record
+from .model.ollama import OllamaStructuredGateway
 from .raw_export import render_raw_messages
 from .renderer import RenderContext, render_digest
 from .validation import DigestValidationError, validate_digest
@@ -291,7 +292,12 @@ def _run_workflow_unlocked(
                 None, None, digest={"sections": []},
             )
 
-        model_gateway = gateway or HermesModelGateway(config)
+        if gateway is not None:
+            model_gateway = gateway
+        elif workflow.model["provider"] == "ollama-local":
+            model_gateway = OllamaStructuredGateway(config)
+        else:
+            model_gateway = HermesModelGateway(config)
         try:
             model_result: ModelInvocationResult = model_gateway.summarize(
                 workflow, usable, context_rows=context_rows

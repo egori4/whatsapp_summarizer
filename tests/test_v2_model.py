@@ -98,6 +98,29 @@ def test_prompt_injection_remains_inside_untrusted_source_json():
     assert "attacker@example.com" not in BASE_SYSTEM_PROMPT
 
 
+
+
+def test_system_prompt_handles_off_channel_follow_up_without_overclaiming_unresolved():
+    assert "Absence of an explicit answer in WhatsApp is not by itself evidence" in BASE_SYSTEM_PROMPT
+    assert "do not infer its contents or outcome" in BASE_SYSTEM_PROMPT
+    assert "do not routinely explain that its contents are unavailable" in BASE_SYSTEM_PROMPT
+    assert "Do not create a separate unanswered-question item" in BASE_SYSTEM_PROMPT
+
+
+def test_system_prompt_preserves_evidence_boundaries_for_digest_semantics():
+    assert "Preserve uncertainty proportionately" in BASE_SYSTEM_PROMPT
+    assert "Do not upgrade tentative source language into a confirmed conclusion" in BASE_SYSTEM_PROMPT
+    assert "For multi-part questions, evaluate each part independently" in BASE_SYSTEM_PROMPT
+    assert "The actions field is evidence-only" in BASE_SYSTEM_PROMPT
+    assert "Do not turn reasonable recommendations" in BASE_SYSTEM_PROMPT
+    assert "If a topic is only an unresolved question" in BASE_SYSTEM_PROMPT
+    assert "prefer one technical update that preserves the unresolved part" in BASE_SYSTEM_PROMPT
+    assert "Do not treat social responses, reactions, congratulations, thanks" in BASE_SYSTEM_PROMPT
+    assert "Use reported_by for the participant(s) who originated" in BASE_SYSTEM_PROMPT
+    assert "Write for a busy technical reader" in BASE_SYSTEM_PROMPT
+    assert "remaining practical question" in BASE_SYSTEM_PROMPT
+    assert "Do not call out missing option text" in BASE_SYSTEM_PROMPT
+
 def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes"
     fake_root = fake_home / "hermes-agent"

@@ -3,13 +3,13 @@
 **Last updated:** 2026-09-29  
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
-**Current working branch:** `v2.1-historical-context`  
-**Production baseline tag:** `v2.0.0` at `8082c9a`  
-**Current package version on feature branch:** `2.1.0`
+**Current working branch:** `v2.2-ollama-structured-output`
+**Current merged baseline:** v2.1 on `main` at `549e989`
+**Current package version on feature branch:** `2.2.0`
 
 ## 1. What this project does
 
-The project collects messages from configured WhatsApp groups through a dedicated standalone Hermes/Baileys bridge, stores them in SQLite, periodically summarizes only new material with a one-shot Hermes model invocation, validates the model output, renders an email digest, sends it through SMTP, and advances a per-workflow checkpoint only after successful delivery.
+The project collects messages from configured WhatsApp groups through a dedicated standalone Hermes/Baileys bridge, stores them in SQLite, periodically summarizes only new material with one model call, validates the model output, renders an email digest, sends it through SMTP, and advances a per-workflow checkpoint only after successful delivery. Hermes remains the default model gateway; v2.2 adds one explicit native Ollama structured-output path for `provider: ollama-local`.
 
 The current implementation is intentionally narrow and operationally conservative. It is not a chatbot, does not reply to WhatsApp, and does not give the model tools or normal Hermes memory/context.
 
@@ -20,7 +20,8 @@ Read these in this order:
 1. `README.md` — deployment, configuration, operations, troubleshooting, model switching, upgrades.
 2. `V2_ARCHITECTURE_SPEC.md` — original v2 architecture and invariants.
 3. `V2_1_HISTORICAL_CONTEXT_PLAN.md` — v2.1 historical-context design and config-upgrade behavior.
-4. `HANDOFF.md` — current state, decisions, observed quality, and important caveats that span the above documents.
+4. `V2_2_OLLAMA_STRUCTURED_OUTPUT_ARCHITECTURE.md` — v2.2 native Ollama structured-output design, implementation, tests, live validation, and quality findings.
+5. `HANDOFF.md` — current state, decisions, observed quality, and important caveats that span the above documents.
 
 The README is the primary operations guide. When older architecture examples conflict with the current README/runtime, prefer the README and current code.
 
@@ -36,31 +37,40 @@ The README is the primary operations guide. When older architecture examples con
 
 The v2.0 baseline had 98 passing v2 tests before v2.1 work began.
 
-### v2.1 branch
+### v2.1 merged baseline
 
-v2.1 work is isolated on:
-
-```text
-v2.1-historical-context
-```
-
-Key changes on this branch include:
-
-- historical context lookback;
-- config schema upgrade workflow;
-- branch/update/editable-install documentation;
-- local/custom Hermes provider model-switching documentation.
-
-Important commits include:
+v2.1 was merged to `main` in PR #1 at merge commit:
 
 ```text
-f48fd9f feat(v2.1): add historical context lookback
-f1b7e4a docs: clarify branch updates and editable install
-d366ab0 feat(v2.1): add safe config upgrade workflow
-47c0122 docs: document model switching and local providers
+549e989 Merge pull request #1 from egori4/v2.1-historical-context
 ```
 
-Do not assume `main` contains v2.1 until this branch is explicitly merged/tagged.
+It includes historical context lookback, backward-compatible config upgrade behavior, updated architecture/handoff documentation, and local/custom Hermes provider model-switching guidance.
+
+### v2.2 feature branch
+
+Current work is isolated on:
+
+```text
+v2.2-ollama-structured-output
+```
+
+v2.2 adds only an explicit native Ollama structured-output path for `provider: ollama-local`. All other providers continue through the existing Hermes path.
+
+Implemented behavior:
+
+- direct native Ollama `/api/chat`;
+- workflow-derived JSON Schema;
+- `stream:false`, `think:false`, `temperature:0`;
+- no cloud fallback;
+- no repair/retry call;
+- no lexical/keyword message classification;
+- existing semantic/source validator retained;
+- existing historical-context, freshness, delivery and checkpoint semantics retained.
+
+Final local automated validation: `143 passed`, with `git diff --check` clean.
+
+Live `qwen3.5:9b` structured-output testing passed application validation on acknowledgement/context, focused technical, and multi-topic cases. Model-quality caveats remain: duplicate topic placement across sections and answered questions sometimes remain listed as unresolved. These are documented in the v2.2 architecture file and are intentionally not hidden with heuristics or retry machinery.
 
 ## 4. Core architecture and invariants
 
@@ -82,7 +92,9 @@ SQLite
 per-workflow systemd timer
    |
    v
-Hermes one-shot model worker
+one model call
+   |-- existing Hermes gateway for non-Ollama providers
+   `-- native Ollama structured output for explicit ollama-local
    |
    v
 validate -> render -> SMTP
