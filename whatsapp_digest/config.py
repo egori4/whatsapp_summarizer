@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 import copy
 import os
@@ -420,6 +421,21 @@ def load_config(path: str | Path) -> AppConfig:
         if not isinstance(weekly_enabled, bool):
             raise ConfigError(f"{prefix}.weekly_summary.enabled must be boolean")
         weekly_schedule = None
+        first_partial_week = weekly_raw.get("first_partial_week")
+        first_partial_week_to_only = weekly_raw.get("first_partial_week_to_only", False)
+        if not isinstance(first_partial_week_to_only, bool):
+            raise ConfigError(f"{prefix}.weekly_summary.first_partial_week_to_only must be boolean")
+        if first_partial_week is not None:
+            if not weekly_enabled or not isinstance(first_partial_week, str):
+                raise ConfigError(f"{prefix}.weekly_summary.first_partial_week requires an enabled weekly workflow and YYYY-MM-DD")
+            try:
+                first_date = date.fromisoformat(first_partial_week)
+            except ValueError as exc:
+                raise ConfigError(f"{prefix}.weekly_summary.first_partial_week must be YYYY-MM-DD") from exc
+            if first_date.weekday() != 0 or first_date.isoformat() != first_partial_week:
+                raise ConfigError(f"{prefix}.weekly_summary.first_partial_week must be a Monday YYYY-MM-DD")
+        if first_partial_week_to_only and first_partial_week is None:
+            raise ConfigError(f"{prefix}.weekly_summary.first_partial_week_to_only requires first_partial_week")
         if weekly_enabled:
             if schedule is None or schedule["type"] != "daily":
                 raise ConfigError(f"{prefix}.weekly_summary requires a daily parent schedule")
@@ -492,7 +508,11 @@ def load_config(path: str | Path) -> AppConfig:
             instructions=instructions,
             sections=tuple(sections),
             email={"to": to, "cc": cc, "bcc": bcc, "attach_raw_messages": attach_raw, "subject": subject},
-            weekly_summary={"enabled": weekly_enabled, "schedule": weekly_schedule},
+            weekly_summary={
+                "enabled": weekly_enabled, "schedule": weekly_schedule,
+                "first_partial_week": first_partial_week,
+                "first_partial_week_to_only": first_partial_week_to_only,
+            },
         ))
 
     return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows), digest_days)

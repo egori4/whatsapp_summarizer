@@ -30,7 +30,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.5.0 (feature branch; production currently v2.4.0)
+**Version:** 2.5.0 (production pilot running from the feature branch; main remains v2.4.0)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
@@ -143,6 +143,32 @@ It reuses the parent's To/Cc/Bcc and SMTP credentials, but **never attaches raw
 WhatsApp messages**. The delivery ledger prevents ordinary resends for an
 already-delivered week; SMTP acceptance followed by database failure retains a
 narrow documented duplicate-on-retry risk.
+
+### One-time partial first report on November 9, 2026
+
+The first saved canonical daily reports will be from November 5 onward, so
+the previous Monday's anchor is unavailable. To send a one-time *truthfully
+incomplete* report on November 9, add these keys inside the existing enabled
+weekly_summary block (other keys, including schedule, remain unchanged):
+
+    first_partial_week: "2026-11-02"
+    first_partial_week_to_only: true
+
+The first key is the Monday *start date* of the November 2-9 reporting period.
+Only that exact period can skip the missing predecessor anchor. It selects the
+successful daily digests available before Monday 08:30, and still requires the
+Monday November 9 daily job to have completed. The available saved artifacts
+must form a continuous checkpoint chain; no real or model-inferred WhatsApp
+history is backfilled for November 2-4.
+
+The November 9 email will say PARTIAL in the subject and body, and its metadata
+will show the first actual saved digest date. The To-only option suppresses
+CC/BCC for this one partial pilot, including its failure notice. Daily BCC and
+later complete weekly emails retain the original configured recipients.
+
+From November 16, the selector again requires the normal predecessor anchor.
+The special setting can be removed after the first pilot; normal weekly
+operation and idempotent delivery continue.
 
 ### Weekly commands
 

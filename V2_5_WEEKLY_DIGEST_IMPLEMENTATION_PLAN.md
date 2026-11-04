@@ -1,6 +1,6 @@
 # v2.5.0 — Weekly Digest Implementation Plan, Tests and DoD
 
-**Status:** Phases A/B implemented on feature branch; guarded production rollout pending
+**Status:** v2.5 production pilot active; first partial week configured for November 9, 2026
 **Target:** v2.5.0 on `feature/v2.5.0-weekly-digest` from clean v2.4.0 `main`
 **Architecture contract:** [V2_5_WEEKLY_DIGEST_ARCHITECTURE.md](V2_5_WEEKLY_DIGEST_ARCHITECTURE.md)
 
@@ -280,6 +280,20 @@ Use a deterministic fake AI response for CI. Then, separately, perform a control
 
 These are not prerequisites for v2.5.0.
 
+### One-time partial pilot test extension (November 4, 2026)
+
+- One explicitly named November 2 period can start on the first saved
+  November 5 artifact without a Monday predecessor anchor.
+- It still requires the Monday November 9 daily run, a nonempty selection
+  and an unbroken selected checkpoint chain; later unanchored weeks fail.
+- The subject, text and HTML visibly say PARTIAL and name the first saved date.
+- For that partial period only, first_partial_week_to_only suppresses CC/BCC
+  for mail and related failure alerts. Normal daily and complete weekly sends
+  still inherit their original To/Cc/Bcc.
+- Retries remain idempotent via the unchanged weekly period key.
+- Strict config validation accepts only a quoted ISO-8601 Monday start date
+  and requires first_partial_week for the To-only setting.
+
 ## 9. Validation record — 2026-11-04
 
 **Branch/worktree:** `feature/v2.5.0-weekly-digest`,
@@ -313,3 +327,11 @@ real Global PS workflow, one full anchored week of daily artifacts, live-data
 quality comparison, SMTP recipient approval and real scheduled-operation
 observation. Do not mark the release/deployment gate complete based solely on
 synthetic evidence.
+
+## 10. November 9 partial pilot implementation and validation (2026-11-04)
+
+- Added explicit, single-period `first_partial_week: "2026-11-02"` bootstrap and `first_partial_week_to_only: true`. This does not change ordinary daily collection, checkpointing, or future full-week selection.
+- Full regression: **207 passed** (previous 197 plus 10 targeted tests for partial window, Monday completion, broken continuity, recipient isolation, duplicate prevention and strict configuration).
+- **Real Hermes dry-run:** an isolated SQLite fixture with five synthetic daily artifacts dated November 5-9, no prior anchor, and zero real recipients successfully generated a PARTIAL weekly review. Six evidence items were summarized into four substantive technical topics. Model: `openai-codex / gpt-6.1-sol / medium`.
+- No production email or historical messages were used for partial-pilot validation. The real v2.5 production timer is Monday November 9 at 08:30 ET.
+- Actual production source coverage depends on the successful Nov 5-9 daily jobs; report must not claim full Nov 2-9 coverage.

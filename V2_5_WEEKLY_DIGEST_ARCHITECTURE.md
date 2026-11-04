@@ -82,6 +82,7 @@ flowchart TD
 Before generating or sending a weekly report:
 
 1. Require an **anchor**: the most recent canonical successful daily artifact on or before the previous Monday 08:30 boundary. If missing (e.g., v2.5 enabled mid-week), report `insufficient-history`; do not fabricate a full week.
+   - Exception: one explicitly configured `first_partial_week` can use the earliest persisted daily artifact as its start *only for that named week*. The report must be unmistakably labeled PARTIAL; Monday completion and internal checkpoint continuity still apply.
 2. Order selected artifacts by checkpoint progression. Each artifact's `checkpoint_before` must equal the preceding artifact's `checkpoint_after`, starting from the anchor. This avoids unnoticed omitted/overlapping canonical windows.
 3. Require a canonical successful daily artifact for the **current Monday morning**, completed by the weekly 08:30 cutoff (or a clearly valid later manual recovery for the same period, if introduced in a later release). If absent, report `daily-not-complete`; do not send a partial report.
 4. If selected artifacts are empty, the anchor is missing, a day ended without recovery, input JSON is invalid, or an artifact was pruned, **do not send** a purportedly complete weekly summary.
@@ -131,6 +132,20 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 - Retain full daily `digest_json` for **30 days** (new `retention.digest_days`, default 30 if weekly enabled). Retain weekly JSON for the same period; afterwards null weekly `digest_json`/source manifest as appropriate, but **keep the tiny delivered-period ledger**, or an equivalent non-sensitive key, so an old week cannot be resent simply because content expired.
 - Never purge daily artifacts that are required to synthesize an eligible but not-yet-completed week within the configured 30-day window. After 30 days, a late report is explicitly unavailable without a separate backfill design.
 - When a new feature is not enabled, old v2.4 configs must load without new required fields. Fresh deployment stores artifacts only for workflows that opt into weekly summary, to minimize additional sensitive-data retention.
+
+### One-time bootstrap exception (approved November 4, 2026)
+
+The optional first_partial_week field names a single preceding-Monday start
+date, such as 2026-11-02 for the November 9 delivery. Only this period may
+proceed without the prior checkpoint anchor. Other weeks are unchanged.
+If there are no daily artifacts or no current Monday morning completion, do not
+send. Reject broken checkpoint continuity between all saved selected artifacts.
+
+The exact available daily range is shown as PARTIAL in title/body and subject;
+the weekly model is told not to infer information for uncovered days. An
+explicit first_partial_week_to_only boolean routes this one pilot to the
+parent's To recipients with empty CC/BCC, without altering daily send behavior
+or later full weekly recipients. The ordinary weekly ledger still applies.
 
 ### Delivery ledger semantics
 

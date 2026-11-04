@@ -480,3 +480,160 @@ def test_no_david_email_in_fixture(cfg):
     email = cfg.workflow("global-ps").email
     addresses = email["to"] + email["cc"] + email["bcc"]
     assert all("david.medina" not in address.lower() for address in addresses)
+
+
+# One-time November 9 bootstrap: a named, explicitly incomplete reporting period.
+# Production may start saving canonical daily artifacts on November 5, so an
+# earlier-Monday anchor does not exist and must never be fabricated.
+PARTIAL_CONFIG = CONFIG.replace(
+    "    weekly_summary:\n      enabled: true\n",
+    "    weekly_summary:\n      enabled: true\n"
+    '      first_partial_week: "2026-11-02"\n'
+    "      first_partial_week_to_only: true\n",
+)
+
+
+@pytest.fixture()
+def partial_cfg(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(PARTIAL_CONFIG)
+    return load_config(path)
+
+
+def test_partial_first_week_no_anchor_is_delivered_to_primary_only(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
+    gateway, email = FakeGateway(), FakeDelivery()
+    result = run_weekly(partial_cfg, "global-ps", now=NOW, gateway=gateway, delivery=email)
+    assert result.status == "weekly-delivered"
+    assert result.message_count == 5
+    assert len(email.sent) == 1
+    target, kwargs = email.sent[0]
+    assert target.email["to"] == ["test-recipient@example.com"]
+    assert target.email["cc"] == []
+    assert target.email["bcc"] == []
+    # The real daily parent workflow and its BCC remain completely untouched.
+    assert partial_cfg.workflow("global-ps").email["bcc"] == ["test-blind@example.com"]
+    assert "PARTIAL" in kwargs["subject"]
+    assert "2026-11-09" in kwargs["subject"]
+    assert "PARTIAL" in kwargs["text"]
+    assert "2026-11-05" in kwargs["text"]
+    assert "earlier days unavailable" in kwargs["text"]
+    assert "PARTIAL" in kwargs["html"]
+    assert "PARTIAL COVERAGE" in gateway.user_prompt
+    assert kwargs["raw_text"] is None
+    with DigestDatabase(partial_cfg.database_path) as db:
+        assert db.weekly_report("global-ps", "2026-11-02") is not None
+
+
+def test_partial_first_week_idempotent(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
+    email = FakeDelivery()
+    assert run_weekly(partial_cfg, "global-ps", now=NOW, gateway=FakeGateway(),
+                      delivery=email).status == "weekly-delivered"
+    second, second_email = FakeGateway(), FakeDelivery()
+    assert run_weekly(partial_cfg, "global-ps", now=NOW, gateway=second,
+                      delivery=second_email).status == "already-delivered"
+    assert second.called == 0
+    assert not second_email.sent
+    assert len(email.sent) == 1
+
+
+def test_partial_first_week_requires_monday_daily_completion(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6])
+    email = FakeDelivery()
+    r = run_weekly(partial_cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=email)
+    assert r.status == "daily-not-complete"
+    assert not email.sent
+
+
+def test_partial_first_week_rejects_missing_artifacts(partial_cfg):
+    with DigestDatabase(partial_cfg.database_path):
+        pass
+    result = run_weekly(partial_cfg, "global-ps", now=NOW,
+                        gateway=FakeGateway(), delivery=FakeDelivery())
+    assert result.status == "daily-not-complete"
+
+
+def test_partial_first_week_still_rejects_broken_chain(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
+    with DigestDatabase(partial_cfg.database_path) as db:
+        db._conn.execute("UPDATE daily_digest_artifacts SET checkpoint_before=999 WHERE run_id='day6'")
+        db._conn.commit()
+    gateway, email = FakeGateway(), FakeDelivery()
+    result = run_weekly(partial_cfg, "global-ps", now=NOW,
+                        gateway=gateway, delivery=email)
+    assert result.status == "broken-checkpoint-chain"
+    assert gateway.called == 0 and not email.sent
+
+
+def test_partial_first_week_no_model_failure_notification_to_bcc(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
+    gateway = FakeGateway(fail=HermesGatewayError("test"))
+    email = FakeDelivery()
+    with pytest.raises(RunnerError, match="weekly model failed"):
+        run_weekly(partial_cfg, "global-ps", now=NOW, gateway=gateway, delivery=email)
+    assert not email.sent
+    assert len(email.failures) == 1
+    assert email.failures[0][0].email["bcc"] == []
+    assert email.failures[0][0].email["cc"] == []
+
+
+def test_next_week_requires_anchor_and_uses_normal_bcc(partial_cfg):
+    seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
+    with DigestDatabase(partial_cfg.database_path) as db:
+        before = 6
+        for n in range(7):
+            day = date(2026, 11, 10) + timedelta(days=n)
+            seed_artifact(db, f"next-{n}", day, before, before + 1)
+            before += 1
+    now = datetime(2026, 11, 16, 15, tzinfo=timezone.utc)
+    gateway, email = FakeGateway(), FakeDelivery()
+    result = run_weekly(partial_cfg, "global-ps", period="2026-11-09", now=now,
+                        gateway=gateway, delivery=email)
+    assert result.status == "weekly-delivered"
+    assert "PARTIAL" not in email.sent[0][1]["subject"]
+    assert "PARTIAL" not in email.sent[0][1]["text"]
+    assert email.sent[0][0].email["bcc"] == ["test-blind@example.com"]
+    assert "PARTIAL COVERAGE" not in gateway.user_prompt
+
+
+def test_other_unanchored_week_cannot_use_partial_exception(partial_cfg):
+    with DigestDatabase(partial_cfg.database_path) as db:
+        for n in range(7):
+            day = date(2026, 11, 10) + timedelta(days=n)
+            seed_artifact(db, f"next-{n}", day, n, n + 1)
+    result = run_weekly(
+        partial_cfg, "global-ps", period="2026-11-09",
+        now=datetime(2026, 11, 16, 15, tzinfo=timezone.utc),
+        gateway=FakeGateway(), delivery=FakeDelivery(),
+    )
+    assert result.status == "insufficient-history"
+
+
+def test_config_first_partial_week_strict_validation(tmp_path):
+    replacements = [
+        '      first_partial_week: "2026-11-03"\n',  # Tuesday
+        '      first_partial_week: "November 2"\n',
+        '      first_partial_week: 2026-11-02\n',  # YAML date object, not string
+        '      first_partial_week_to_only: "yes"\n',
+    ]
+    for replacement in replacements:
+        edited = PARTIAL_CONFIG
+        if "first_partial_week_to_only:" in replacement:
+            edited = edited.replace("      first_partial_week_to_only: true\n", replacement)
+        else:
+            edited = edited.replace('      first_partial_week: "2026-11-02"\n', replacement)
+        path = tmp_path / "config.yaml"
+        path.write_text(edited)
+        with pytest.raises(ConfigError):
+            load_config(path)
+
+
+def test_config_to_only_flag_requires_named_partial_week(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(CONFIG.replace(
+        "    weekly_summary:\n      enabled: true\n",
+        "    weekly_summary:\n      enabled: true\n      first_partial_week_to_only: true\n",
+    ))
+    with pytest.raises(ConfigError, match="requires first_partial_week"):
+        load_config(path)

@@ -69,6 +69,9 @@ workflows:
           guidance: Important technical questions or sub-questions that the supplied messages clearly leave unresolved. Do not duplicate a topic already fully represented elsewhere unless the unresolved part is materially distinct.
     weekly_summary:
       enabled: false  # opt in after deployment; no weekly timer while disabled
+      # Optional first partial pilot if enabled mid-week:
+      # first_partial_week: "2026-11-02"  # sends Nov 9 at 08:30
+      # first_partial_week_to_only: true  # no CC/BCC on partial only
       schedule:
         type: weekly
         days: [mon]

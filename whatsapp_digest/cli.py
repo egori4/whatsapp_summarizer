@@ -14,7 +14,7 @@ from .delivery.email import EmailDelivery
 from .logging_setup import setup_logging
 from .locking import WorkflowBusyError, workflow_lock
 from .runner import RunnerError, RunResult, run_workflow
-from .weekly import run_weekly, resolve_period, _select_covered
+from .weekly import run_weekly, resolve_period, _select_covered, _is_first_partial_week
 from .systemd import (
     ScheduleError,
     install_schedules,
@@ -158,7 +158,10 @@ def _cmd_status(path: str, workflow_id: str | None = None) -> int:
                 try:
                     candidate = resolve_period(workflow)
                     _artifacts, reason = _select_covered(db, workflow, candidate)
-                    print(f"  Weekly readiness ({candidate.week_start}): {reason or 'ready'}")
+                    readiness = reason or ("ready (partial first week)" if _is_first_partial_week(
+                        db, workflow, candidate
+                    ) else "ready")
+                    print(f"  Weekly readiness ({candidate.week_start}): {readiness}")
                 except RunnerError:
                     print("  Weekly readiness: no completed reporting period")
             else:

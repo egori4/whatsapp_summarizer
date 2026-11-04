@@ -4,7 +4,7 @@
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
 **Current development branch:** `feature/v2.5.0-weekly-digest` in sibling worktree `/home/egori4/scripts/whatsapp-tech-digest-v2.5.0`
-**Production checkout:** `/home/egori4/scripts/whatsapp-tech-digest` stays on `main` at v2.4.0 / `11e434b`
+**Production checkout:** m920q runs feature/v2.5.0-weekly-digest (2.5.0) since Nov 4; main remains v2.4.0 / 11e434b
 **Development package version:** `2.5.0` (not deployed)
 
 ## v2.5 feature status — IMPORTANT (2026-11-04)
@@ -18,10 +18,9 @@
 - Source validation uses saved daily item IDs; no second group JID, raw rereads, or weekly checkpoint.
 - BCC is inherited in production, but unit and integration fixtures use only
   `test-recipient@example.com` / `test-blind@example.com`, never real addresses.
-- **No production configuration, database or systemd units modified.** No real SMTP sent.
-- Full release requires explicit production deploy, first anchored week, real AI
-  dry-run quality review and separately authorized SMTP send.
-- Core daily regression + weekly acceptance: **197 tests passed**, plus one real Hermes synthetic dry-run (no SMTP). See section 9 of the implementation plan.
+- v2.5 production pilot is active, including the Monday 08:30 weekly timer; daily behavior and BCC remain unchanged. One isolated synthetic SMTP test was sent with no CC/BCC.
+- The first partial weekly pilot is configured for November 9, 2026 (November 2 period key). It reports available saved Nov 5-9 digests only, requires Monday daily completion, labels the email PARTIAL, and suppresses CC/BCC for the pilot only. Full normal weekly coverage resumes November 16.
+- Core daily regression + weekly acceptance: **207 tests passed** after the one-time partial pilot addition. Separate real Hermes synthetic partial dry-run passed, no email. See implementation plan sections 9-10.
 - This handoff also retains historical v2.0-v2.2 notes below; those earlier
   branch/status descriptions are historical, not the present working state.
 
