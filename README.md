@@ -10,6 +10,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 - [Status](#status)
 - [Architecture](#architecture)
+- [Weekly roll-up v2.5](#weekly-roll-up-v25)
 - [Safety model](#safety-model)
 - [Prerequisites](#prerequisites)
 - [Initial installation](#initial-installation)
@@ -29,14 +30,14 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.4.0
+**Version:** 2.5.0 (feature branch; production currently v2.4.0)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
 **WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
 **Delivery:** SMTP email
 
-The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
+v2.5 adds an **optional weekly digest of persisted daily summaries**. The feature is under validation on its own Git worktree/branch; production's daily service remains on v2.4.0 until explicitly deployed. Other workflow behavior is unchanged when the weekly option is disabled.
 
 ### v2.4 technical clarity and BCC delivery
 
@@ -48,7 +49,7 @@ Workflow emails also support optional `bcc` recipients for digests, failure aler
 
 v2.3 improves cross-digest technical-thread continuity. When a new message continues a previously processed discussion, historical context is used to produce a self-contained update that briefly preserves the original problem/request, important prior state, still-relevant unresolved sub-questions, and the new update. Historical-only material is still not emitted as new content, and every digest item must remain grounded by at least one current message.
 
-For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
+For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md) and [V2_5_WEEKLY_DIGEST_ARCHITECTURE.md](V2_5_WEEKLY_DIGEST_ARCHITECTURE.md).
 For the current engineering state, decisions, quality evidence, and next steps, see [HANDOFF.md](HANDOFF.md).
 
 > Some older files in this repository describe the previous v1 architecture. For v2 deployment and operations, this README and `V2_ARCHITECTURE_SPEC.md` are authoritative.
@@ -85,6 +86,107 @@ checkpoint
 ```
 
 Hermes may continue running its normal gateway for Telegram or other integrations, but the Hermes gateway's own WhatsApp adapter must remain disabled. This prevents two consumers from competing for the same WhatsApp session/message queue.
+
+---
+
+## Weekly roll-up v2.5
+
+Weekly is a **downstream consolidation of the validated daily digests**, not another
+WhatsApp collector, raw-message replay, group workflow, or checkpoint. Existing
+daily digests are sent as before. When weekly is enabled, every successful,
+checkpoint-driven, real daily completion also saves validated JSON in local SQLite
+(including empty runs), in the **same transaction** as checkpoint completion.
+Failed/dry-run/explicit-window replays are never weekly source artifacts.
+
+### Enablement (only after release and review)
+
+Add to the existing workflow entry in local `config.yaml`:
+
+```yaml
+retention:
+  processed_raw_days: 7
+  log_days: 30
+  digest_days: 30
+
+workflows:
+  - id: global-ps
+    # Keep the existing WhatsApp group ID, daily schedule, model, and email settings.
+    weekly_summary:
+      enabled: true
+      schedule:
+        type: weekly
+        days: [mon]
+        at: "08:30"
+```
+
+The above is a partial configuration illustration; merge these keys into the
+real configuration, **do not replace its other fields**. Weekly requires a daily
+parent schedule, one Monday, the same timezone as the parent, a weekly time
+strictly later than the daily clock, and `digest_days >= 14` (30 by default).
+If absent/disabled, there is no weekly timer and no new digest capture.
+
+The Monday 08:30 local-time boundary selects canonical daily artifacts completed
+in **(previous Monday 08:30, current Monday 08:30]**, plus an earlier
+checkpoint anchor. The **current Monday morning** daily completion must exist,
+and the selected checkpoint chain must be contiguous. Missed intermediate
+daily runs can be covered by a later successful daily catch-up. First weeks without
+the previous-Monday anchor report `insufficient-history` rather than claiming
+complete coverage; a late Monday daily run that missed the cutoff requires
+manual review. This is a *daily-processing window*, **not** an exact calendar
+midnight-to-midnight WhatsApp transcript.
+
+The weekly model receives only saved validated daily cards, deduplicates related
+threads, and distinguishes lab tests, proposals, fixes and unresolved questions.
+Every item must cite daily cards; emails display their **daily digest dates**.
+Weekly subject is `[TechTeam Weekly] Week ending YYYY-MM-DD — NAME`.
+It reuses the parent's To/Cc/Bcc and SMTP credentials, but **never attaches raw
+WhatsApp messages**. The delivery ledger prevents ordinary resends for an
+already-delivered week; SMTP acceptance followed by database failure retains a
+narrow documented duplicate-on-retry risk.
+
+### Weekly commands
+
+```bash
+# On v2.5 deployment; does not enable a timer by itself:
+digest --config ./config.yaml config validate
+
+# Preview only (never sends mail / moves checkpoint / marks delivered):
+digest --config ./config.yaml weekly global-ps --dry-run
+digest --config ./config.yaml weekly global-ps --period 2026-11-02 --dry-run
+
+# Show whether an earlier report was delivered and current schedule:
+digest --config ./config.yaml status global-ps
+digest --config ./config.yaml schedule status
+
+# Only after verifying production recipients/coverage:
+digest --config ./config.yaml schedule install
+digest --config ./config.yaml weekly global-ps
+```
+
+An incomplete weekly run is recorded with reason `insufficient-history`,
+`daily-not-complete` or `broken-checkpoint-chain`; the CLI returns nonzero,
+and no email is sent. Invalid output, model errors, and SMTP errors are retryable
+without changing the parent's daily checkpoint. A complete all-empty week gets
+a short "No material updates" email without invoking AI.
+
+`retention.digest_days` (default 30) separately purges sensitive saved daily
+and weekly JSON. The small weekly period-delivery identity is retained after
+content expires, preventing replay by accidental historical reruns. Keep local
+database/dry-run previews private; unlike WhatsApp messages, digest JSON is an
+additional stored copy of synthesized technical knowledge.
+
+**Test safety:** do not run weekly email delivery against the live recipient
+configuration while developing. Use a temporary sanitized configuration,
+an isolated SQLite database, a fake SMTP delivery and/or `--dry-run` with BCC
+empty. An existing BCC recipient is inherited *only after intentionally enabling
+weekly in production*. The new feature has no automatic real-send smoke test.
+
+**Rollback:** set `weekly_summary.enabled: false`, then execute
+`digest --config ./config.yaml schedule install`; only the weekly units
+(`whatsapp-digest-<id>-weekly.service/.timer`) are removed. Daily timer,
+bridge and collector remain. Existing additive SQLite tables need not be
+deleted. See [the implementation plan](V2_5_WEEKLY_DIGEST_IMPLEMENTATION_PLAN.md)
+for the complete DoD and manual rollout gate.
 
 ---
 

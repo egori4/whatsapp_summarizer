@@ -1,11 +1,29 @@
 # WhatsApp Technical Digest — Engineering Handoff
 
-**Last updated:** 2026-09-29  
+**Last updated:** 2026-11-04
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
-**Current working branch:** `v2.2-ollama-structured-output`
-**Current merged baseline:** v2.1 on `main` at `549e989`
-**Current package version on feature branch:** `2.2.0`
+**Current development branch:** `feature/v2.5.0-weekly-digest` in sibling worktree `/home/egori4/scripts/whatsapp-tech-digest-v2.5.0`
+**Production checkout:** `/home/egori4/scripts/whatsapp-tech-digest` stays on `main` at v2.4.0 / `11e434b`
+**Development package version:** `2.5.0` (not deployed)
+
+## v2.5 feature status — IMPORTANT (2026-11-04)
+
+- Development only on `feature/v2.5.0-weekly-digest`, isolated Git worktree.
+- Weekly architecture: `V2_5_WEEKLY_DIGEST_ARCHITECTURE.md`.
+- Build/test/DoD: `V2_5_WEEKLY_DIGEST_IMPLEMENTATION_PLAN.md`.
+- New modules: `whatsapp_digest/weekly.py` and weekly-specific tests.
+- New SQLite storage: `daily_digest_artifacts` and `weekly_reports`.
+- Weekly opt-in is `weekly_summary.enabled: true` inside the existing daily workflow.
+- Source validation uses saved daily item IDs; no second group JID, raw rereads, or weekly checkpoint.
+- BCC is inherited in production, but unit and integration fixtures use only
+  `test-recipient@example.com` / `test-blind@example.com`, never real addresses.
+- **No production configuration, database or systemd units modified.** No real SMTP sent.
+- Full release requires explicit production deploy, first anchored week, real AI
+  dry-run quality review and separately authorized SMTP send.
+- Core daily regression + weekly acceptance: **197 tests passed**, plus one real Hermes synthetic dry-run (no SMTP). See section 9 of the implementation plan.
+- This handoff also retains historical v2.0-v2.2 notes below; those earlier
+  branch/status descriptions are historical, not the present working state.
 
 ## 1. What this project does
 
@@ -47,9 +65,9 @@ v2.1 was merged to `main` in PR #1 at merge commit:
 
 It includes historical context lookback, backward-compatible config upgrade behavior, updated architecture/handoff documentation, and local/custom Hermes provider model-switching guidance.
 
-### v2.2 feature branch
+### v2.2 historical implementation
 
-Current work is isolated on:
+The earlier v2.2 work was isolated on:
 
 ```text
 v2.2-ollama-structured-output

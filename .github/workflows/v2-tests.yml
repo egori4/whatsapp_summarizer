@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "feature/**"
     paths:
       - "whatsapp_digest/**"
       - "tests/test_v2_*.py"

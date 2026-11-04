@@ -5,6 +5,7 @@ paths:
 retention:
   processed_raw_days: 7
   log_days: 30
+  digest_days: 30  # local validated daily/weekly JSON; independent of raw retention
 
 context:
   enabled: true
@@ -66,6 +67,12 @@ workflows:
         - id: unanswered
           title: Unanswered Technical Questions
           guidance: Important technical questions or sub-questions that the supplied messages clearly leave unresolved. Do not duplicate a topic already fully represented elsewhere unless the unresolved part is materially distinct.
+    weekly_summary:
+      enabled: false  # opt in after deployment; no weekly timer while disabled
+      schedule:
+        type: weekly
+        days: [mon]
+        at: "08:30"  # after the daily 08:00 job; same timezone
     delivery:
       email:
         to:

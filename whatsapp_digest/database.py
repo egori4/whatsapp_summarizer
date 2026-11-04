@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import sqlite3
 from typing import Iterator, Any
@@ -98,6 +99,31 @@ class DigestDatabase:
                 status TEXT NOT NULL,
                 failure_stage TEXT,
                 failure_reason TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS daily_digest_artifacts (
+                run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+                workflow_id TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                checkpoint_before INTEGER NOT NULL,
+                checkpoint_after INTEGER NOT NULL,
+                outcome TEXT NOT NULL,
+                window_start TEXT,
+                window_end TEXT,
+                digest_json TEXT NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_daily_artifact_period
+                ON daily_digest_artifacts(workflow_id, completed_at);
+            CREATE TABLE IF NOT EXISTS weekly_reports (
+                workflow_id TEXT NOT NULL,
+                week_start_local_date TEXT NOT NULL,
+                week_end_local_date TEXT NOT NULL,
+                run_id TEXT NOT NULL REFERENCES runs(run_id),
+                delivered_at TEXT NOT NULL,
+                input_run_ids_json TEXT NOT NULL,
+                digest_json TEXT,
+                PRIMARY KEY (workflow_id, week_start_local_date)
             );
             """
         )
@@ -317,9 +343,33 @@ class DigestDatabase:
         provider: str | None = None,
         model: str | None = None,
         reasoning: str | None = None,
+        digest_artifact: dict[str, Any] | None = None,
+        window_start: str | None = None,
+        window_end: str | None = None,
+        checkpoint_before: int | None = None,
     ) -> None:
         stamp = _utc_now()
         with self._tx() as conn:
+            existing = conn.execute("SELECT status FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            if existing is None:
+                raise ValueError("unknown run_id")
+            # Avoid stale duplicate finalization moving a later checkpoint backwards.
+            if existing["status"] in {"delivered", "success-no-material", "success-no-pending", "success-no-usable"}:
+                return
+            if digest_artifact is not None:
+                state = conn.execute("SELECT checkpoint_seq FROM workflow_state WHERE workflow_id=?", (workflow_id,)).fetchone()
+                actual_before = int(state["checkpoint_seq"] or 0) if state else 0
+                if checkpoint_before is None or actual_before != checkpoint_before:
+                    raise ValueError("daily checkpoint changed before artifact finalization")
+                conn.execute(
+                    """INSERT INTO daily_digest_artifacts
+                      (run_id, workflow_id, completed_at, checkpoint_before, checkpoint_after,
+                       outcome, window_start, window_end, digest_json)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (run_id, workflow_id, stamp, checkpoint_before, checkpoint_seq,
+                     status, window_start, window_end,
+                     json.dumps(digest_artifact, ensure_ascii=False, separators=(",", ":"))),
+                )
             conn.execute(
                 "INSERT OR IGNORE INTO workflow_state(workflow_id) VALUES (?)",
                 (workflow_id,),
@@ -341,6 +391,74 @@ class DigestDatabase:
                 """,
                 (stamp, status, provider, model, reasoning, run_id),
             )
+
+    def daily_anchor(self, workflow_id: str, boundary_utc: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            """SELECT * FROM daily_digest_artifacts WHERE workflow_id=? AND completed_at<=?
+            ORDER BY completed_at DESC, run_id DESC LIMIT 1""",
+            (workflow_id, boundary_utc),
+        ).fetchone()
+
+    def daily_artifacts(self, workflow_id: str, after_utc: str, through_utc: str) -> list[sqlite3.Row]:
+        return list(self._conn.execute(
+            """SELECT * FROM daily_digest_artifacts
+            WHERE workflow_id=? AND completed_at>? AND completed_at<=?
+            ORDER BY completed_at, run_id""",
+            (workflow_id, after_utc, through_utc),
+        ))
+
+    def weekly_report(self, workflow_id: str, week_start: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT * FROM weekly_reports WHERE workflow_id=? AND week_start_local_date=?",
+            (workflow_id, week_start),
+        ).fetchone()
+
+    def last_weekly_report(self, workflow_id: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            """SELECT * FROM weekly_reports WHERE workflow_id=?
+            ORDER BY week_start_local_date DESC LIMIT 1""", (workflow_id,),
+        ).fetchone()
+
+    def last_weekly_attempt(self, workflow_id: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            """SELECT run_id, started_at, status, failure_stage FROM runs
+            WHERE workflow_id=? AND mode IN ('weekly', 'weekly-scheduled', 'weekly-dry-run')
+            ORDER BY started_at DESC, run_id DESC LIMIT 1""", (workflow_id,),
+        ).fetchone()
+
+    def complete_weekly_delivery(
+        self, *, run_id: str, workflow_id: str, week_start: str, week_end: str,
+        source_run_ids: list[str], digest: dict[str, Any],
+        provider: str, model: str, reasoning: str,
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                """INSERT INTO weekly_reports (workflow_id, week_start_local_date,
+                week_end_local_date, run_id, delivered_at, input_run_ids_json, digest_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (workflow_id, week_start, week_end, run_id, _utc_now(),
+                 json.dumps(source_run_ids), json.dumps(digest, ensure_ascii=False)),
+            )
+            conn.execute(
+                """UPDATE runs SET completed_at=?, status='weekly-delivered', provider=?,
+                model=?, reasoning=? WHERE run_id=?""",
+                (_utc_now(), provider, model, reasoning, run_id),
+            )
+
+    def purge_digest_artifacts(self, retention_days: int, *, now: datetime | None = None) -> int:
+        if retention_days < 0:
+            raise ValueError("retention_days must be non-negative")
+        current = now or datetime.now(timezone.utc)
+        cutoff = (current - timedelta(days=retention_days)).isoformat()
+        with self._tx() as conn:
+            removed = conn.execute(
+                "DELETE FROM daily_digest_artifacts WHERE completed_at<?", (cutoff,)
+            ).rowcount
+            conn.execute(
+                """UPDATE weekly_reports SET digest_json=NULL, input_run_ids_json='[]'
+                WHERE delivered_at<? AND digest_json IS NOT NULL""", (cutoff,)
+            )
+        return removed
 
     def create_run(self, *, run_id: str, workflow_id: str, mode: str, checkpoint_before: int | None, cutoff_seq: int | None, message_count: int = 0) -> None:
         self._conn.execute(

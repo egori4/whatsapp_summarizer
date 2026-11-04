@@ -155,3 +155,78 @@ def validate_digest(
             })
 
     return {"sections": normalized_sections}
+
+
+def validate_weekly_digest(
+    raw: str,
+    evidence_cards: list[dict[str, Any]],
+    section_titles: dict[str, str],
+) -> dict[str, Any]:
+    """Validate weekly JSON against cited daily-summary cards, never raw WhatsApp rows."""
+    parsed = _parse(raw)
+    sections = parsed.get("sections")
+    if not isinstance(sections, list) or len(sections) > 30:
+        raise DigestValidationError("sections must be a list of at most 30 entries")
+    allowed = {card["source_id"]: card for card in evidence_cards}
+    output: list[dict[str, Any]] = []
+    seen_sections: set[str] = set()
+    for index, section in enumerate(sections):
+        if not isinstance(section, dict):
+            raise DigestValidationError(f"sections[{index}] must be an object")
+        section_id = _string(section.get("section_id"), "section_id", max_chars=100)
+        if section_id not in section_titles or section_id in seen_sections:
+            raise DigestValidationError(f"unknown or duplicate weekly section: {section_id}")
+        seen_sections.add(section_id)
+        items = section.get("items")
+        if not isinstance(items, list) or len(items) > 100:
+            raise DigestValidationError("weekly section items must be a list of at most 100")
+        clean: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise DigestValidationError("weekly item must be an object")
+            ids = _string_list(item.get("source_ids"), "source_ids", max_items=100, max_chars=200)
+            if not ids or len(ids) != len(set(ids)) or any(cid not in allowed for cid in ids):
+                raise DigestValidationError("weekly item cites missing/duplicate evidence card")
+            cited = [allowed[cid] for cid in ids]
+            names = {
+                name for card in cited
+                for name in [*(card.get("reported_by") or []), *(card.get("contributors") or [])]
+            }
+            reported = _string_list(item.get("reported_by"), "reported_by", max_items=20, max_chars=120)
+            contributors = _string_list(item.get("contributors"), "contributors", max_items=30, max_chars=120)
+            if any(name not in names for name in reported + contributors):
+                raise DigestValidationError("weekly item attributes participant absent from cited evidence")
+            references = _string_list(item.get("references"), "references", max_items=30, max_chars=2000)
+            evidence_text = "\n".join(
+                str(value)
+                for card in cited
+                for field in ("title", "summary", "details", "actions", "questions", "references")
+                for value in ([card.get(field, "")] if isinstance(card.get(field), str)
+                              else card.get(field, []))
+            )
+            # Validate URLs embedded anywhere in weekly prose, not just references[].
+            written = [
+                item.get("title", ""), item.get("summary", ""),
+                *(item.get("details") or []), *(item.get("actions") or []),
+                *(item.get("questions") or []), *references,
+            ]
+            for value in written:
+                if not isinstance(value, str):
+                    continue  # the strict shape checks below reject bad fields
+                for url in re.findall(r"https?://[^\s<>\"']+", value):
+                    if url.rstrip(".,;:)]}") not in evidence_text:
+                        raise DigestValidationError("weekly item cites URL absent from cited evidence")
+            clean.append({
+                "title": _string(item.get("title"), "title", max_chars=240),
+                "summary": _string(item.get("summary"), "summary", max_chars=5000),
+                "details": _string_list(item.get("details"), "details"),
+                "actions": _string_list(item.get("actions"), "actions"),
+                "questions": _string_list(item.get("questions"), "questions"),
+                "reported_by": reported,
+                "contributors": contributors,
+                "references": references,
+                "source_ids": ids,
+            })
+        if clean:
+            output.append({"section_id": section_id, "title": section_titles[section_id], "items": clean})
+    return {"sections": output}

@@ -14,6 +14,7 @@ from .delivery.email import EmailDelivery
 from .logging_setup import setup_logging
 from .locking import WorkflowBusyError, workflow_lock
 from .runner import RunnerError, RunResult, run_workflow
+from .weekly import run_weekly, resolve_period, _select_covered
 from .systemd import (
     ScheduleError,
     install_schedules,
@@ -64,6 +65,12 @@ def _parser() -> argparse.ArgumentParser:
     window.add_argument("--since", help="Initial/manual start time (ISO-8601 or YYYY-MM-DD HH:MM)")
     run.add_argument("--dry-run", action="store_true", help="Generate and validate without email or checkpoint update")
     run.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
+
+    weekly = sub.add_parser("weekly", help="Consolidate canonical daily digests for one completed week")
+    weekly.add_argument("workflow", help="Existing parent workflow ID")
+    weekly.add_argument("--period", help="Previous Monday local date YYYY-MM-DD")
+    weekly.add_argument("--dry-run", action="store_true", help="Validate and render without SMTP/ledger update")
+    weekly.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
 
     schedule = sub.add_parser("schedule")
     schedule_sub = schedule.add_subparsers(dest="schedule_command", required=True)
@@ -139,6 +146,23 @@ def _cmd_status(path: str, workflow_id: str | None = None) -> int:
                 print(f"  Schedule: {detail} {schedule['timezone']}")
             else:
                 print("  Schedule: manual only")
+            if workflow.weekly_summary.get("enabled"):
+                weekly_schedule = workflow.weekly_summary["schedule"]
+                print(f"  Weekly: enabled {weekly_schedule['days'][0]} {weekly_schedule['at']} {weekly_schedule['timezone']}")
+                latest_week = db.last_weekly_report(workflow.id)
+                print(f"  Last weekly delivered: {latest_week['week_start_local_date'] if latest_week else 'none'}")
+                latest_attempt = db.last_weekly_attempt(workflow.id)
+                if latest_attempt:
+                    print(f"  Last weekly attempt: {latest_attempt['status']}"
+                          f" ({latest_attempt['failure_stage'] or 'complete'})")
+                try:
+                    candidate = resolve_period(workflow)
+                    _artifacts, reason = _select_covered(db, workflow, candidate)
+                    print(f"  Weekly readiness ({candidate.week_start}): {reason or 'ready'}")
+                except RunnerError:
+                    print("  Weekly readiness: no completed reporting period")
+            else:
+                print("  Weekly: disabled")
     return 0
 
 
@@ -297,6 +321,32 @@ def _save_dry_run_artifacts(database_path: Path, result: RunResult) -> Path | No
     return root
 
 
+def _cmd_weekly(path: str, *, workflow: str, period: str | None,
+                dry_run: bool, scheduled: bool) -> int:
+    cfg = load_config(path)
+    bounds = resolve_period(cfg.workflow(workflow), period=period)
+    result = run_weekly(
+        cfg, workflow, period=period, dry_run=dry_run, scheduled=scheduled,
+    )
+    print(f"Workflow: {result.workflow_id}")
+    print(f"Week: {bounds.week_start.isoformat()} to {bounds.week_end.isoformat()}")
+    print(f"Status: {result.status}")
+    print(f"Run ID: {result.run_id}")
+    print(f"Evidence items: {result.message_count}")
+    if dry_run and result.rendered_text is not None and result.rendered_html is not None:
+        # No WhatsApp raw export for weekly digests.
+        root = cfg.database_path.parent / "dry-runs" / result.run_id
+        root.mkdir(parents=True, exist_ok=False, mode=0o700)
+        root.chmod(0o700)
+        _write_private_text(root / "digest.txt", result.rendered_text)
+        _write_private_text(root / "digest.html", result.rendered_html)
+        print(result.rendered_text.rstrip())
+        print(f"Weekly dry-run artifacts: {root}")
+    if result.status in {"insufficient-history", "daily-not-complete", "broken-checkpoint-chain"}:
+        return 2
+    return 0
+
+
 def _cmd_run(
     path: str,
     *,
@@ -365,6 +415,11 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_schedule(args.config, args.schedule_command)
         if args.command == "transport":
             return _cmd_transport(args.config, args.transport_command)
+        if args.command == "weekly":
+            return _cmd_weekly(
+                args.config, workflow=args.workflow, period=args.period,
+                dry_run=args.dry_run, scheduled=args.scheduled,
+            )
         if args.command == "run":
             return _cmd_run(
                 args.config,

@@ -135,6 +135,12 @@ def _apply_retention(db: DigestDatabase, config: AppConfig) -> None:
         return
     if removed:
         logger.info("processed-message retention removed=%d", removed)
+    try:
+        removed_digests = db.purge_digest_artifacts(config.digest_days)
+        if removed_digests:
+            logger.info("daily digest artifacts expired=%d", removed_digests)
+    except Exception as exc:
+        logger.warning("digest retention failed: %s", type(exc).__name__)
 
 
 def _run_workflow_unlocked(
@@ -266,6 +272,8 @@ def _run_workflow_unlocked(
                     workflow.id,
                     cutoff,
                     status="success-no-pending",
+                    digest_artifact={"sections": []} if workflow.weekly_summary["enabled"] and explicit_since is None else None,
+                    checkpoint_before=checkpoint if workflow.weekly_summary["enabled"] and explicit_since is None else None,
                 )
                 _apply_retention(db, config)
                 status = "success-no-pending"
@@ -284,6 +292,8 @@ def _run_workflow_unlocked(
                     workflow.id,
                     cutoff,
                     status="success-no-usable",
+                    digest_artifact={"sections": []} if workflow.weekly_summary["enabled"] and explicit_since is None else None,
+                    checkpoint_before=checkpoint if workflow.weekly_summary["enabled"] and explicit_since is None else None,
                 )
                 _apply_retention(db, config)
                 status = "success-no-usable"
@@ -468,6 +478,9 @@ def _run_workflow_unlocked(
                 provider=model_result.provider,
                 model=model_result.model,
                 reasoning=model_result.reasoning,
+                digest_artifact=digest if workflow.weekly_summary["enabled"] and explicit_since is None else None,
+                window_start=window_start, window_end=window_end,
+                checkpoint_before=checkpoint if workflow.weekly_summary["enabled"] and explicit_since is None else None,
             )
             _apply_retention(db, config)
             return RunResult(
@@ -517,6 +530,9 @@ def _run_workflow_unlocked(
             provider=model_result.provider,
             model=model_result.model,
             reasoning=model_result.reasoning,
+            digest_artifact=digest if workflow.weekly_summary["enabled"] and explicit_since is None else None,
+            window_start=window_start, window_end=window_end,
+            checkpoint_before=checkpoint if workflow.weekly_summary["enabled"] and explicit_since is None else None,
         )
         logger.info(
             "[%s] checkpoint advanced run_id=%s checkpoint=%s status=delivered",

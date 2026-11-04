@@ -173,6 +173,7 @@ class WorkflowConfig:
     instructions: str
     sections: tuple[SectionConfig, ...]
     email: dict[str, Any]
+    weekly_summary: dict[str, Any] = field(default_factory=lambda: {"enabled": False, "schedule": None})
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,7 @@ class AppConfig:
     default_timezone: str
     context: dict[str, Any]
     workflows: tuple[WorkflowConfig, ...] = field(default_factory=tuple)
+    digest_days: int = 30
 
     def workflow(self, workflow_id: str) -> WorkflowConfig:
         for workflow in self.workflows:
@@ -306,7 +308,8 @@ def load_config(path: str | Path) -> AppConfig:
     retention = _mapping(root.get("retention", {}), "retention")
     processed_raw_days = retention.get("processed_raw_days", 7)
     log_days = retention.get("log_days", 30)
-    for key, value in (("processed_raw_days", processed_raw_days), ("log_days", log_days)):
+    digest_days = retention.get("digest_days", 30)
+    for key, value in (("processed_raw_days", processed_raw_days), ("log_days", log_days), ("digest_days", digest_days)):
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ConfigError(f"retention.{key} must be a non-negative integer")
 
@@ -412,6 +415,32 @@ def load_config(path: str | Path) -> AppConfig:
         seen_jids.add(group_jid)
         timezone = _timezone(workflow.get("timezone", default_timezone), f"{prefix}.timezone")
         schedule = _validate_schedule(workflow.get("schedule"), timezone, f"{prefix}.schedule")
+        weekly_raw = _mapping(workflow.get("weekly_summary", {}), f"{prefix}.weekly_summary")
+        weekly_enabled = weekly_raw.get("enabled", False)
+        if not isinstance(weekly_enabled, bool):
+            raise ConfigError(f"{prefix}.weekly_summary.enabled must be boolean")
+        weekly_schedule = None
+        if weekly_enabled:
+            if schedule is None or schedule["type"] != "daily":
+                raise ConfigError(f"{prefix}.weekly_summary requires a daily parent schedule")
+            if digest_days < 14:
+                raise ConfigError("retention.digest_days must be at least 14 when weekly is enabled")
+            if "schedule" not in weekly_raw:
+                raise ConfigError(f"{prefix}.weekly_summary.schedule is required when enabled")
+            weekly_schedule = _validate_schedule(
+                weekly_raw["schedule"], timezone, f"{prefix}.weekly_summary.schedule"
+            )
+            if (weekly_schedule is None or weekly_schedule["type"] != "weekly"
+                    or weekly_schedule["days"] != ["mon"]):
+                raise ConfigError(f"{prefix}.weekly_summary.schedule must use weekly / days: [mon]")
+            if weekly_schedule["timezone"] != timezone:
+                raise ConfigError(f"{prefix}.weekly_summary schedule timezone must match parent")
+            if weekly_schedule["at"] <= schedule["at"]:
+                raise ConfigError(f"{prefix}.weekly_summary must run after the daily schedule")
+        elif weekly_raw.get("schedule") is not None:
+            # An explicitly disabled schedule is retained as configuration only;
+            # it is still validated when enabled.
+            pass
 
         model_raw = _mapping(workflow.get("model", {}), f"{prefix}.model")
         model = {
@@ -463,6 +492,7 @@ def load_config(path: str | Path) -> AppConfig:
             instructions=instructions,
             sections=tuple(sections),
             email={"to": to, "cc": cc, "bcc": bcc, "attach_raw_messages": attach_raw, "subject": subject},
+            weekly_summary={"enabled": weekly_enabled, "schedule": weekly_schedule},
         ))
 
-    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows))
+    return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows), digest_days)
