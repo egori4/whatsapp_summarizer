@@ -444,6 +444,7 @@ def load_config(path: str | Path) -> AppConfig:
         workflow_email = _mapping(delivery.get("email"), f"{prefix}.delivery.email")
         to = _validate_emails(workflow_email.get("to"), f"{prefix}.delivery.email.to", required=True)
         cc = _validate_emails(workflow_email.get("cc", []), f"{prefix}.delivery.email.cc", required=False)
+        bcc = _validate_emails(workflow_email.get("bcc", []), f"{prefix}.delivery.email.bcc", required=False)
         attach_raw = workflow_email.get("attach_raw_messages", True)
         if not isinstance(attach_raw, bool):
             raise ConfigError(f"{prefix}.delivery.email.attach_raw_messages must be boolean")
@@ -461,7 +462,7 @@ def load_config(path: str | Path) -> AppConfig:
             model=model,
             instructions=instructions,
             sections=tuple(sections),
-            email={"to": to, "cc": cc, "attach_raw_messages": attach_raw, "subject": subject},
+            email={"to": to, "cc": cc, "bcc": bcc, "attach_raw_messages": attach_raw, "subject": subject},
         ))
 
     return AppConfig(source, database_path, log_path, processed_raw_days, log_days, hermes, whatsapp, email, default_timezone, context, tuple(workflows))

@@ -120,8 +120,13 @@ def test_system_prompt_preserves_evidence_boundaries_for_digest_semantics():
     assert "Write for a busy technical reader" in BASE_SYSTEM_PROMPT
     assert "remaining practical question" in BASE_SYSTEM_PROMPT
     assert "Do not call out missing option text" in BASE_SYSTEM_PROMPT
-    assert "make the digest item self-contained" in BASE_SYSTEM_PROMPT
-    assert "original issue -> prior state -> current update -> remaining explicit question/action" in BASE_SYSTEM_PROMPT
+    assert "make the update self-contained" in BASE_SYSTEM_PROMPT
+    assert "do not retell the conversation" in BASE_SYSTEM_PROMPT
+    assert "copy-paste-ready PS technical team update" in BASE_SYSTEM_PROMPT
+    assert "explain the connection between the reported failure/symptom" in BASE_SYSTEM_PROMPT
+    assert "Distinguish a working lab test from verified remediation" in BASE_SYSTEM_PROMPT
+    assert "Do not leave a directly supported practical takeaway implicit" in BASE_SYSTEM_PROMPT
+    assert "their reported scenario" in BASE_SYSTEM_PROMPT
 
 def test_gateway_uses_private_request_file_and_no_source_in_process_args(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes"

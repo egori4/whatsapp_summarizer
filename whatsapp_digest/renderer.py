@@ -56,10 +56,11 @@ def _append_text_list(lines: list[str], label: str, values: list[str]) -> None:
 
 
 def render_text(digest: dict[str, Any], context: RenderContext) -> str:
-    lines = _metadata_lines(context)
+    lines = [f"{context.workflow_name} — {context.generated_at:%Y-%m-%d}"]
     sections = digest.get("sections") or []
     if not sections:
         lines.extend(["", "No material updates."])
+        lines.extend(["", "---", *_metadata_lines(context)])
         return "\n".join(lines).rstrip() + "\n"
 
     for section in sections:
@@ -74,11 +75,11 @@ def render_text(digest: dict[str, Any], context: RenderContext) -> str:
             _append_text_list(lines, "Details", item.get("details") or [])
             _append_text_list(lines, "Actions", item.get("actions") or [])
             _append_text_list(lines, "Questions", item.get("questions") or [])
-            if item.get("reported_by"):
-                lines.append("Reported by: " + ", ".join(item["reported_by"]))
-            if item.get("contributors"):
-                lines.append("Contributors: " + ", ".join(item["contributors"]))
+            names = list(dict.fromkeys((item.get("reported_by") or []) + (item.get("contributors") or [])))
+            if names:
+                lines.append("Contacts: " + ", ".join(names))
             _append_text_list(lines, "References", item.get("references") or [])
+    lines.extend(["", "---", *_metadata_lines(context)])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -107,14 +108,9 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
                 _html_list("Actions", item.get("actions") or []),
                 _html_list("Questions", item.get("questions") or []),
             ]
-            if item.get("reported_by"):
-                extras.append(
-                    f"<div><strong>Reported by:</strong> {escape(', '.join(item['reported_by']))}</div>"
-                )
-            if item.get("contributors"):
-                extras.append(
-                    f"<div><strong>Contributors:</strong> {escape(', '.join(item['contributors']))}</div>"
-                )
+            names = list(dict.fromkeys((item.get("reported_by") or []) + (item.get("contributors") or [])))
+            if names:
+                extras.append(f'<div class="contacts"><strong>Contacts:</strong> {escape(", ".join(names))}</div>')
             extras.append(_html_list("References", item.get("references") or []))
             item_html.append(
                 "<article>"
@@ -136,9 +132,9 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
         "body{font-family:Arial,sans-serif;line-height:1.45;max-width:900px;margin:24px auto;padding:0 16px;color:#222}"
         "table{border-collapse:collapse;margin-bottom:24px}th,td{text-align:left;vertical-align:top;padding:3px 12px 3px 0}"
         "h2{margin-top:28px;border-bottom:1px solid #ddd;padding-bottom:5px}h3{margin-bottom:5px}"
-        "article{margin-bottom:22px}ul{margin-top:4px}"
+        "article{margin-bottom:18px}ul{margin-top:4px}.contacts{font-size:13px;color:#555;margin-top:6px}.metadata{margin-top:24px;color:#666;font-size:12px}"
         "</style></head><body>"
-        f"<table>{metadata}</table>{body}"
+        f"<h2>{escape(context.workflow_name)} — {context.generated_at:%Y-%m-%d}</h2>{body}<div class=\"metadata\"><table>{metadata}</table></div>"
         "</body></html>\n"
     )
 

@@ -35,6 +35,7 @@ workflows:
       email:
         to: [one@example.com, two@example.com]
         cc: [cc@example.com]
+        bcc: [blind@example.com]
         attach_raw_messages: true
         subject: "[Digest] {date} — {workflow_name}"
 """
@@ -101,10 +102,12 @@ def test_digest_email_uses_only_configured_recipients_and_raw_attachment(tmp_pat
     assert smtp.timeout == 15
     assert smtp.started_tls is True
     assert smtp.login_args == ("digest-user", "secret")
-    assert smtp.to_addrs == ["one@example.com", "two@example.com", "cc@example.com"]
+    assert smtp.to_addrs == ["one@example.com", "two@example.com", "cc@example.com", "blind@example.com"]
     assert "attacker@example.com" not in smtp.to_addrs
     assert smtp.sent["To"] == "one@example.com, two@example.com"
     assert smtp.sent["Cc"] == "cc@example.com"
+    assert smtp.sent.get("Bcc") is None
+    assert "blind@example.com" not in smtp.sent.as_string()
     assert smtp.sent["X-WhatsApp-Digest-Run-ID"] == "run-1"
     attachments = list(smtp.sent.iter_attachments())
     assert len(attachments) == 1
@@ -159,9 +162,24 @@ def test_failure_email_contains_no_raw_source(tmp_path, monkeypatch):
         reason="unknown source id",
         date="2026-09-27",
     )
-    body = FakeSMTP.instances[-1].sent.get_body(preferencelist=("plain",)).get_content()
+    smtp = FakeSMTP.instances[-1]
+    body = smtp.sent.get_body(preferencelist=("plain",)).get_content()
     assert "unknown source id" in body
     assert "No raw WhatsApp source content" in body
+    assert smtp.to_addrs == ["one@example.com", "two@example.com", "cc@example.com", "blind@example.com"]
+    assert smtp.sent.get("Bcc") is None
+    assert "blind@example.com" not in smtp.sent.as_string()
+
+
+def test_smtp_test_email_uses_bcc_without_exposing_address(tmp_path, monkeypatch):
+    FakeSMTP.instances.clear()
+    cfg = make_config(tmp_path)
+    monkeypatch.setenv("DIGEST_PASSWORD", "secret")
+    EmailDelivery(cfg, smtp_factory=FakeSMTP).send_test(cfg.workflow("tests"))
+    smtp = FakeSMTP.instances[-1]
+    assert smtp.to_addrs == ["one@example.com", "two@example.com", "cc@example.com", "blind@example.com"]
+    assert smtp.sent.get("Bcc") is None
+    assert "blind@example.com" not in smtp.sent.as_string()
 
 
 def test_refused_recipient_is_reported_as_delivery_failure(tmp_path, monkeypatch):

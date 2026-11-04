@@ -433,7 +433,7 @@ def test_raw_export_uses_gateway_source_records_not_reread_database(tmp_path):
                     {
                         "source_id": "m1",
                         "timestamp": "2026-09-27T14:00:00+00:00",
-                        "sender": "Olesya",
+                        "sender": "Egor",
                         "text": "Exact text supplied to Hermes",
                     },
                 ),

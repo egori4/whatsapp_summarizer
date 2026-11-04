@@ -52,7 +52,9 @@ workflows:
         technical questions.
         Do not invent recommendations or next steps merely because they would be reasonable.
         Actions and do's/don'ts must be explicitly supported by the conversation.
-        If a discussion responds to a question, include the original question and who asked it when materially useful.
+        Lead with the technical finding rather than recounting the conversation.
+        Keep the issue, resolution or candidate workaround, precise technical details,
+        and status. Preserve relevant technical contributors so colleagues can follow up.
         If only part of a multi-part question is answered, preserve the unanswered part rather than implying full resolution.
       sections:
         - id: technical_updates
@@ -69,5 +71,6 @@ workflows:
         to:
           - user@example.com
         cc: []
+        bcc: []
         attach_raw_messages: true
         subject: "[TechTeam Daily] {date} — {workflow_name}"

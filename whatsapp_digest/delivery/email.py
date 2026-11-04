@@ -25,7 +25,7 @@ class EmailDelivery:
         self._smtp_factory = smtp_factory
 
     def _recipients(self, workflow: WorkflowConfig) -> list[str]:
-        return list(workflow.email["to"]) + list(workflow.email["cc"])
+        return list(workflow.email["to"]) + list(workflow.email["cc"]) + list(workflow.email["bcc"])
 
     def _connect_and_send(self, message: EmailMessage, recipients: list[str]) -> None:
         cfg = self.config.email

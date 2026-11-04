@@ -29,7 +29,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.3.0
+**Version:** 2.4.0
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
@@ -37,6 +37,12 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 **Delivery:** SMTP email
 
 The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
+
+### v2.4 technical clarity and BCC delivery
+
+v2.4 improves the PS digest writing rules: lead with the technical finding, retain the essential symptom and limitations, distinguish candidate solutions from verified fixes, and state actionable takeaways only when supported by the source. Email and text digests now consolidate contributor names under `Contacts` and move runtime metadata below the technical updates.
+
+Workflow emails also support optional `bcc` recipients for digests, failure alerts, and SMTP tests. BCC recipients are included in the SMTP envelope but are not disclosed in email headers; recipients are still controlled exclusively through local `config.yaml`.
 
 ### v2.3 continuity improvement
 
@@ -599,6 +605,7 @@ delivery:
     to:
       - user@example.com
     cc: []
+    bcc: []
     attach_raw_messages: true
     subject: "[TechTeam Daily] {date} — {workflow_name}"
 ```
@@ -610,7 +617,7 @@ Supported subject fields:
 - `{workflow_id}`
 - `{run_id}`
 
-Recipients are fixed by config; WhatsApp/model content cannot change them.
+Recipients are fixed by config; WhatsApp/model content cannot change them. `bcc` recipients are included in the SMTP envelope without being added to visible `To` or `Cc` headers. This applies to digest, failure, and SMTP test emails.
 
 ### Schedules
 
@@ -875,6 +882,8 @@ If a logical workflow moves to a completely different WhatsApp group, prefer a *
 ---
 
 ## Updating, switching branches, and applying changes
+
+Release versions are tracked in `pyproject.toml`, `whatsapp_digest/__init__.py`, and the README Status section. Keep these in sync, commit and test the release on `main`, and push an annotated Git tag (`vX.Y.Z`) so the exact version can be recovered later. Production should normally run from a clean, committed `main` checkout rather than an uncommitted feature branch. The local `config.yaml` is intentionally ignored and must never be included in a release commit.
 
 The project is installed in editable mode, so source-code changes in the checked-out working tree are picked up by the next `digest` process. You do **not** normally restart long-running services just because runner/model/rendering Python code changed.
 

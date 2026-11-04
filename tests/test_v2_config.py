@@ -159,6 +159,7 @@ def test_email_defaults_are_normalized(tmp_path):
     assert cfg.email["username"] is None
     assert cfg.email["starttls"] is True
     assert cfg.email["timeout_seconds"] == 30
+    assert cfg.workflows[0].email["bcc"] == []
 
 
 def test_invalid_email_subject_placeholder_is_rejected(tmp_path):
