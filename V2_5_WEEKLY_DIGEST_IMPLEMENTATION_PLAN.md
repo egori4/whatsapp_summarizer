@@ -1,5 +1,8 @@
 # v2.5.0 — Weekly Digest Implementation Plan, Tests and DoD
 
+> **Post-implementation update (2026-11-09):** The weekly presentation was refined from three learnings/issues/questions sections to seven broad product/topic categories. The current code and README are authoritative for report formatting, while this document retains the original design and coverage/safety rationale. Shared product naming is defined in `whatsapp_digest/model/product_glossary.py`.
+
+
 **Status:** v2.5 production pilot active; first partial week configured for November 9, 2026
 **Target:** v2.5.0 on `feature/v2.5.0-weekly-digest` from clean v2.4.0 `main`
 **Architecture contract:** [V2_5_WEEKLY_DIGEST_ARCHITECTURE.md](V2_5_WEEKLY_DIGEST_ARCHITECTURE.md)

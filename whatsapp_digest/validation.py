@@ -216,7 +216,14 @@ def validate_weekly_digest(
                 for url in re.findall(r"https?://[^\s<>\"']+", value):
                     if url.rstrip(".,;:)]}") not in evidence_text:
                         raise DigestValidationError("weekly item cites URL absent from cited evidence")
+            takeaway = item.get("takeaway")
+            if not isinstance(takeaway, str) or len(takeaway) > 1000:
+                raise DigestValidationError("weekly takeaway must be a string of at most 1000 characters")
+            for url in re.findall(r"https?://[^\s<>\"']+", takeaway):
+                if url.rstrip(".,;:)]}") not in evidence_text:
+                    raise DigestValidationError("weekly takeaway cites URL absent from evidence")
             clean.append({
+                "takeaway": takeaway.strip(),
                 "title": _string(item.get("title"), "title", max_chars=240),
                 "summary": _string(item.get("summary"), "summary", max_chars=5000),
                 "details": _string_list(item.get("details"), "details"),

@@ -1,5 +1,8 @@
 # v2.5.0 — Weekly Technical Digest Architecture
 
+> **Post-implementation update (2026-11-09):** The weekly presentation was refined from three learnings/issues/questions sections to seven broad product/topic categories. The current code and README are authoritative for report formatting, while this document retains the original design and coverage/safety rationale. Shared product naming is defined in `whatsapp_digest/model/product_glossary.py`.
+
+
 **Status:** Implemented in isolated `feature/v2.5.0-weekly-digest` worktree; production rollout pending
 **Repository:** `egori4/whatsapp_summarizer`
 **Baseline reviewed:** `main` at `11e434b` / v2.4.0, on `m920q` (2026-11-04)

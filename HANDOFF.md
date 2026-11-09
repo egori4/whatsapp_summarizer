@@ -1,15 +1,24 @@
+## Weekly product-family terminology and email-format refinement (November 9, 2026)
+- A shared, code-owned Radware glossary (`whatsapp_digest/model/product_glossary.py`) is added to both daily and weekly system prompts: DP/DPX, CC/CC+, Cyber Controller variants, CWAAP, major legacy and cloud families. Grouping must not erase exact variants/limits.
+- Weekly has seven categories: Cyber Controller / Management; DefensePro / DefensePro X; Alteon / AppWall; Cloud Security; Other Products & Services; Cross-product Topics; Team Notes. Empty categories are not rendered. Primary-subject classification avoids duplicate or artificial cross-product topics.
+- Weekly presentation is compact: finding, essential supporting details, optional evidence-backed takeaway, explicit follow-ups and open questions, and contacts. Per-item daily evidence dates stay in stored JSON but are not printed; period/coverage metadata is still visible.
+- Daily rendering, recipient configuration, source coverage, weekly delivery ledger and systemd scheduling remain unchanged. The originally delivered November 9 partial report stays immutable.
+- The first November 9 partial report used To-only delivery; parent BCC includes David.Medina@radware.com and will apply to later regular weekly reports. A safe dry run of an already delivered week never emails or replaces the delivery ledger.
+- Preview the first week: `./.venv/bin/python -m whatsapp_digest.cli --config config.yaml weekly global-ps --period 2026-11-02 --dry-run`
+- Regression command: `./.venv/bin/python -m pytest -q`
+
 # WhatsApp Technical Digest — Engineering Handoff
 
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-09
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
 **Current development branch:** `feature/v2.5.0-weekly-digest` in sibling worktree `/home/egori4/scripts/whatsapp-tech-digest-v2.5.0`
 **Production checkout:** m920q runs feature/v2.5.0-weekly-digest (2.5.0) since Nov 4; main remains v2.4.0 / 11e434b
-**Development package version:** `2.5.0` (not deployed)
+**Package version:** `2.5.0` (production pilot active on feature branch; `main` still v2.4.0)
 
-## v2.5 feature status — IMPORTANT (2026-11-04)
+## v2.5 release/pilot status — 2026-11-09
 
-- Development only on `feature/v2.5.0-weekly-digest`, isolated Git worktree.
+- The feature branch `feature/v2.5.0-weekly-digest` is the active checkout on `m920q`; do not describe it as undeployed.
 - Weekly architecture: `V2_5_WEEKLY_DIGEST_ARCHITECTURE.md`.
 - Build/test/DoD: `V2_5_WEEKLY_DIGEST_IMPLEMENTATION_PLAN.md`.
 - New modules: `whatsapp_digest/weekly.py` and weekly-specific tests.
@@ -20,7 +29,7 @@
   `test-recipient@example.com` / `test-blind@example.com`, never real addresses.
 - v2.5 production pilot is active, including the Monday 08:30 weekly timer; daily behavior and BCC remain unchanged. One isolated synthetic SMTP test was sent with no CC/BCC.
 - The first partial weekly pilot is configured for November 9, 2026 (November 2 period key). It reports available saved Nov 5-9 digests only, requires Monday daily completion, labels the email PARTIAL, and suppresses CC/BCC for the pilot only. Full normal weekly coverage resumes November 16.
-- Core daily regression + weekly acceptance: **207 tests passed** after the one-time partial pilot addition. Separate real Hermes synthetic partial dry-run passed, no email. See implementation plan sections 9-10.
+- Core regression + weekly acceptance: **212 tests passed** on November 9. A production-data weekly dry run succeeded with the final product-family layout; no email was sent for this final validation.
 - This handoff also retains historical v2.0-v2.2 notes below; those earlier
   branch/status descriptions are historical, not the present working state.
 

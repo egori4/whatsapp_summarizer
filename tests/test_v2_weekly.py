@@ -147,7 +147,8 @@ def weekly_item(ids, **overrides):
     item = {
         "title": "AppWall wildcard behavior",
         "summary": "Wildcard matches subdomains but not apex; lab-tested only.",
-        "details": [], "actions": [], "questions": [],
+        "details": [], "takeaway": "Check the host pattern before rollout.",
+        "actions": [], "questions": [],
         "reported_by": ["Artur"], "contributors": [],
         "references": ["https://example.org/knowledge"], "source_ids": ids,
     }
@@ -155,7 +156,7 @@ def weekly_item(ids, **overrides):
     return item
 
 
-def weekly_output(ids, *, section="key_learnings", **changes):
+def weekly_output(ids, *, section="alteon_appwall", **changes):
     return {"sections": [{
         "section_id": section, "title": "generated title",
         "items": [weekly_item(ids, **changes)],
@@ -265,12 +266,14 @@ def test_coverage_and_successful_weekly_delivery(cfg):
     assert result.status == "weekly-delivered"
     assert result.message_count == 6
     assert gateway.called == 1
-    assert gateway.workflow.sections[0].id == "key_learnings"
+    assert gateway.workflow.sections[0].id == "cyber_controller"
     assert len(email.sent) == 1
     assert email.sent[0][1]["raw_text"] is None
     assert "Weekly" in email.sent[0][1]["subject"]
     assert "2026-11-09" in email.sent[0][1]["subject"]
-    assert "Daily digest dates" in email.sent[0][1]["text"]
+    assert "Daily digest dates" not in email.sent[0][1]["text"]
+    assert "Alteon / AppWall" in email.sent[0][1]["text"]
+    assert "Check the host pattern" in email.sent[0][1]["text"]
     assert email.sent[0][0].email["bcc"] == ["test-blind@example.com"]
     with DigestDatabase(cfg.database_path) as db:
         assert db.weekly_report("global-ps", "2026-11-02") is not None
@@ -292,13 +295,26 @@ def test_weekly_second_run_is_idempotent(cfg):
     assert len(first_email.sent) == 1
 
 
+def test_weekly_delivered_period_can_be_reformatted_only_as_dry_run(cfg):
+    seed_week(cfg)
+    first = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=FakeDelivery())
+    email = FakeDelivery()
+    result = run_weekly(cfg, "global-ps", now=NOW, dry_run=True,
+                        gateway=FakeGateway(), delivery=email)
+    assert result.status == "weekly-dry-run-success"
+    assert result.rendered_text
+    assert not email.sent
+    with DigestDatabase(cfg.database_path) as db:
+        assert db.weekly_report("global-ps", "2026-11-02")["run_id"] == first.run_id
+
+
 def test_weekly_dry_run_no_email_no_ledger(cfg):
     seed_week(cfg)
     email = FakeDelivery()
     result = run_weekly(cfg, "global-ps", now=NOW, dry_run=True,
                         gateway=FakeGateway(), delivery=email)
     assert result.status == "weekly-dry-run-success"
-    assert result.rendered_html and "Weekly Review" in result.rendered_html
+    assert result.rendered_html and "Global PS:" in result.rendered_html
     assert result.raw_text is None
     assert not email.sent
     with DigestDatabase(cfg.database_path) as db:
@@ -415,8 +431,73 @@ def test_weekly_fake_prompt_security_and_provider_schema(cfg):
     run_weekly(cfg, "global-ps", now=NOW, dry_run=True, gateway=fake, delivery=FakeDelivery())
     assert "ignore" in fake.system_prompt.lower()
     assert "lab success is not production" in fake.system_prompt.lower()
-    assert "only the three" in fake.system_prompt.lower()
+    assert "seven configured" in fake.system_prompt.lower()
     assert "sections" in fake.schema["properties"]
+
+
+def test_weekly_product_family_categories_and_alias_prompt():
+    from whatsapp_digest.weekly import WEEKLY_SECTIONS
+    from whatsapp_digest.model.hermes import BASE_SYSTEM_PROMPT
+    ids = [section.id for section in WEEKLY_SECTIONS]
+    assert ids == [
+        "cyber_controller", "defensepro_dpx", "alteon_appwall",
+        "cloud_security", "other_products", "cross_product", "team_notes",
+    ]
+    assert SECTION_TITLES["cyber_controller"] == "Cyber Controller / Management"
+    assert SECTION_TITLES["defensepro_dpx"] == "DefensePro / DefensePro X"
+    assert SECTION_TITLES["cloud_security"] == "Cloud Security"
+    for alias in (
+        "DP = DefensePro", "DPX = DefensePro X",
+        "CC = Cyber Controller", "CC+ = Cyber Controller Plus",
+        "CWAAP refers to Cloud Application Protection Service",
+    ):
+        assert alias in BASE_SYSTEM_PROMPT
+        assert alias in WEEKLY_SYSTEM_PROMPT
+    assert "PRIMARY technical subject" in WEEKLY_SYSTEM_PROMPT
+    assert "Grouping does NOT mean product variants have identical capabilities" in WEEKLY_SYSTEM_PROMPT
+    assert "A CC+ requirement compared with DefensePro capacity is normally CC/Management" in WEEKLY_SYSTEM_PROMPT
+    assert "Cloud Firewall-as-a-Service" in WEEKLY_SYSTEM_PROMPT
+    assert "APSolute Vision" in WEEKLY_SYSTEM_PROMPT
+
+
+def test_weekly_product_format_single_family_and_distinct_limits():
+    from whatsapp_digest.renderer import RenderContext, render_digest
+    from dataclasses import replace
+    from datetime import datetime
+    ctx = RenderContext(
+        workflow_name="Global PS Technical Digest", workflow_id="global-ps",
+        run_id="test", generated_at=datetime(2026, 11, 9, 9, 0),
+        timezone="America/Toronto", provider="fixture", model="test",
+        reasoning="none", message_count=2, window_start=None, window_end=None,
+        weekly_period="PARTIAL Nov 5-9", weekly_label="Nov 5–9, 2026 (PARTIAL)",
+    )
+    one = weekly_item(["daily:one:technical_updates:0"],
+                      title="CC+ DNS allowlist", summary="CC+ limit: 100,000.",
+                      details=["This is a CC+ protection limit."],
+                      takeaway="Validate the required record count.",
+                      questions=["Is a higher CC+ limit planned?"],
+                      evidence_dates=["2026-11-06"])
+    two = weekly_item(["daily:two:technical_updates:0"],
+                      title="Cyber Controller X", summary="Distinct CC X behavior.",
+                      details=[], takeaway="", questions=[],
+                      evidence_dates=["2026-11-07"])
+    result = render_digest({"sections": [
+        {"section_id": "cyber_controller",
+         "title": "Cyber Controller / Management", "items": [one, two]},
+        {"section_id": "cloud_security",
+         "title": "Cloud Security", "items": []},
+    ]}, ctx)
+    assert result.text.count("Cyber Controller / Management") == 1
+    assert "CC+ limit: 100,000." in result.text
+    assert "Distinct CC X behavior." in result.text
+    assert "  → Validate the required record count." in result.text
+    assert "  Open: Is a higher CC+ limit planned?" in result.text
+    assert "Daily digest dates:" not in result.text
+    assert "Cloud Security" not in result.text
+    assert "2026-11-06" not in result.text
+    assert result.html.count("<h2>Cyber Controller / Management</h2>") == 1
+    assert '<ul class="weekly-topics">' in result.html
+    assert "Cloud Security" not in result.html
 
 
 def test_weekly_model_failure_does_not_commit(cfg):

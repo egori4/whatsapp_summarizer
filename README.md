@@ -30,14 +30,22 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.5.0 (production pilot running from the feature branch; main remains v2.4.0)
+**Version:** 2.5.0 (deployed pilot on `feature/v2.5.0-weekly-digest`; `main` remains v2.4.0 until merged)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
 **WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
 **Delivery:** SMTP email
 
-v2.5 adds an **optional weekly digest of persisted daily summaries**. The feature is under validation on its own Git worktree/branch; production's daily service remains on v2.4.0 until explicitly deployed. Other workflow behavior is unchanged when the weekly option is disabled.
+v2.5 adds an **optional weekly digest of persisted daily summaries**. The v2.5 feature branch is running as a production pilot on `m920q` (daily and Monday 08:30 ET weekly timers). This release tag identifies the validated v2.5.0 code on that branch; merging to `main` and pushing the tag are separate operations. Other workflow behavior is unchanged when the weekly option is disabled.
+
+### v2.5.0 release summary (2026-11-09)
+
+- Evidence-backed weekly consolidation of successful, validated daily digests, with contiguous checkpoint coverage checks and a one-time explicitly partial first week.
+- Seven broad product/topic headings; shared Radware aliases for daily and weekly prompts; variant-specific claims stay tied to the exact product and version.
+- Compact weekly email bullets with supported takeaways, open questions, follow-ups and contacts; evidence dates remain recorded in the validated data.
+- Weekly-only dry-run rerendering of an already-delivered period without email or modifying the delivery ledger. Daily output, delivery recipients and schedule are unchanged by the formatting improvements.
+- Validation: 212 automated tests passed; November 9 weekly production-data dry run generated successfully without delivery.
 
 ### v2.4 technical clarity and BCC delivery
 
@@ -137,7 +145,33 @@ midnight-to-midnight WhatsApp transcript.
 
 The weekly model receives only saved validated daily cards, deduplicates related
 threads, and distinguishes lab tests, proposals, fixes and unresolved questions.
-Every item must cite daily cards; emails display their **daily digest dates**.
+Weekly email reports use **seven broad, non-empty categories**:
+Cyber Controller / Management; DefensePro / DefensePro X; Alteon / AppWall;
+Cloud Security; Other Products & Services; Cross-product Topics; and Team Notes.
+These are reporting buckets, not assertions that editions share capabilities.
+For example, CC/CC+/CC X share the management heading and DP/DPX share the
+DefensePro heading, but statements retain the exact edition, model, version,
+licensing, limit and observed status. Cloud security products share one category
+rather than having separate headings per service. Categories with zero items
+are not printed. Classify by the primary subject; use Cross-product only for
+genuinely inseparable multi-family topics.
+
+A single Radware vocabulary in `whatsapp_digest/model/product_glossary.py`
+is included by both daily and weekly system prompts to explain aliases:
+DP = DefensePro, DPX = DefensePro X, CC = Cyber Controller, CC+ =
+Cyber Controller Plus, and CWAAP = Cloud Application Protection Service.
+It also documents related/legacy management and cloud product families.
+The glossary only guides terminology; it is not evidence of product support
+or compatibility, and it must not override facts in the source messages.
+Daily JSON, email formatting and scheduling remain unchanged.
+
+Weekly bullets include a finding, optional nonduplicative details, a supported
+operational takeaway, explicit follow-ups and open questions, and contacts.
+The model's weekly-only `takeaway` field and source-card citations are validated.
+Daily evidence dates and citations remain in stored JSON for audit, but repetitive
+per-item date blocks are omitted from the weekly email. The report retains
+period and coverage metadata. Weekly evidence is still only the persisted
+daily-digest artifacts, not a new WhatsApp collection.
 Weekly subject is `[TechTeam Weekly] Week ending YYYY-MM-DD — NAME`.
 It reuses the parent's To/Cc/Bcc and SMTP credentials, but **never attaches raw
 WhatsApp messages**. The delivery ledger prevents ordinary resends for an

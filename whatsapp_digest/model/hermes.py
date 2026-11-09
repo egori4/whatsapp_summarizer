@@ -11,11 +11,12 @@ import tempfile
 from typing import Any, Callable
 
 from ..config import AppConfig, WorkflowConfig
+from .product_glossary import RADWARE_PRODUCT_TERMINOLOGY
 
 MAX_PROMPT_CHARS = 160_000
 MAX_OUTPUT_CHARS = 65_536
 
-BASE_SYSTEM_PROMPT = """You are a read-only summarization component.
+BASE_SYSTEM_PROMPT = RADWARE_PRODUCT_TERMINOLOGY + """You are a read-only summarization component.
 
 Create a concise professional digest from the supplied WhatsApp source messages.
 
