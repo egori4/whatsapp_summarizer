@@ -9,12 +9,20 @@
 
 # WhatsApp Technical Digest — Engineering Handoff
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-20
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
-**Current development branch:** `feature/v2.5.0-weekly-digest` in sibling worktree `/home/egori4/scripts/whatsapp-tech-digest-v2.5.0`
+**Current development branch:** `feature/v2.5.0-weekly-digest` at `/home/egori4/scripts/whatsapp-tech-digest` (the only worktree; production pilot checkout)
 **Production checkout:** m920q runs feature/v2.5.0-weekly-digest (2.5.0) since Nov 4; main remains v2.4.0 / 11e434b
 **Package version:** `2.5.0` (production pilot active on feature branch; `main` still v2.4.0)
+
+## Pre-PR stabilization verification — 2026-11-20
+
+- Production remains on `feature/v2.5.0-weekly-digest` at commit `0c6a580`, with a clean working tree and one worktree. `main` remains v2.4.0 until the PR is merged.
+- Full local regression on `m920q`: **212 tests passed** on November 20. GitHub Actions passed on the feature branch head (`0c6a580`) on November 9; the workflow must pass again on the PR.
+- Both scheduled weekly runs succeeded and reported delivery: November 9 partial pilot (8 evidence items) and November 16 normal weekly report (17 evidence items). Daily deliveries succeeded November 16-20; bridge/collector and timers were active.
+- November 15 daily delivery was rejected by the external SMTP relay (`525 5.7.1 Unauthorized IP address`). The next scheduled run delivered successfully on November 16; later daily deliveries also succeeded. If this recurs, investigate relay/IP authorization rather than assuming a weekly-digest regression.
+- No functionality, model prompt, recipients, or timers were changed during this verification.
 
 ## v2.5 release/pilot status — 2026-11-09
 
