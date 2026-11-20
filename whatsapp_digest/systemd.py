@@ -80,23 +80,27 @@ def render_units(
     workflow: WorkflowConfig,
     *,
     python_executable: str | Path | None = None,
+    weekly: bool = False,
 ) -> UnitFiles:
-    if workflow.schedule is None:
+    if weekly and not workflow.weekly_summary.get("enabled"):
+        raise ScheduleError(f"weekly report is disabled for '{workflow.id}'")
+    selected_schedule = workflow.weekly_summary["schedule"] if weekly else workflow.schedule
+    if selected_schedule is None:
         raise ScheduleError(f"workflow '{workflow.id}' is manual-only")
 
     python = Path(python_executable or sys.executable).expanduser()
     if not python.is_absolute():
         python = (Path.cwd() / python).absolute()
-    base_name = f"whatsapp-digest-{workflow.id}"
+    base_name = f"whatsapp-digest-{workflow.id}" + ("-weekly" if weekly else "")
     service_name = f"{base_name}.service"
     timer_name = f"{base_name}.timer"
-    calendar = on_calendar(workflow.schedule)
+    calendar = on_calendar(selected_schedule)
     env_file = schedule_env_file(config)
 
     service = "\n".join(
         [
             "[Unit]",
-            f"Description=WhatsApp Technical Digest - {workflow.name}",
+            f"Description=WhatsApp {'Weekly Technical Review' if weekly else 'Technical Digest'} - {workflow.name}",
             "Wants=network-online.target",
             "After=network-online.target",
             "",
@@ -108,7 +112,7 @@ def render_units(
                 "ExecStart="
                 f"{_quote_exec(python)} -m whatsapp_digest.cli "
                 f"--config {_quote_exec(config.source_path)} "
-                f"run {_quote_exec(workflow.id)} --scheduled"
+                f"{'weekly' if weekly else 'run'} {_quote_exec(workflow.id)} --scheduled"
             ),
             "",
         ]
@@ -130,7 +134,7 @@ def render_units(
         ]
     )
     return UnitFiles(
-        workflow_id=workflow.id,
+        workflow_id=(f"{workflow.id}-weekly" if weekly else workflow.id),
         base_name=base_name,
         service_name=service_name,
         timer_name=timer_name,
@@ -197,12 +201,15 @@ def install_schedules(
 
     desired: dict[str, UnitFiles] = {}
     for workflow in config.workflows:
-        if workflow.schedule is None:
-            continue
-        unit = render_units(config, workflow, python_executable=python_executable)
-        desired[unit.base_name] = unit
-        _write_unit(root / unit.service_name, unit.service_text)
-        _write_unit(root / unit.timer_name, unit.timer_text)
+        units = []
+        if workflow.schedule is not None:
+            units.append(render_units(config, workflow, python_executable=python_executable))
+        if workflow.weekly_summary.get("enabled"):
+            units.append(render_units(config, workflow, python_executable=python_executable, weekly=True))
+        for unit in units:
+            desired[unit.base_name] = unit
+            _write_unit(root / unit.service_name, unit.service_text)
+            _write_unit(root / unit.timer_name, unit.timer_text)
 
     existing = {
         path.stem
@@ -260,33 +267,29 @@ def schedule_status(
 ) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     for workflow in config.workflows:
+        units = []
         if workflow.schedule is None:
             result.append({
-                "workflow_id": workflow.id,
-                "schedule": "manual-only",
-                "enabled": "-",
-                "active": "-",
-                "next": "-",
-                "health": "manual-only",
+                "workflow_id": workflow.id, "schedule": "manual-only",
+                "enabled": "-", "active": "-", "next": "-", "health": "manual-only",
             })
-            continue
-        unit = render_units(config, workflow)
-        enabled = _unit_state(unit.timer_name, "is-enabled", executor=executor)
-        active = _unit_state(unit.timer_name, "is-active", executor=executor)
-        next_result = _run_systemctl(
-            ["show", unit.timer_name, "--property=NextElapseUSecRealtime", "--value"],
-            executor=executor,
-            check=False,
-        )
-        next_value = (next_result.stdout or "").strip() or "-"
-        result.append({
-            "workflow_id": workflow.id,
-            "schedule": unit.on_calendar,
-            "enabled": enabled,
-            "active": active,
-            "next": next_value,
-            "health": "healthy" if enabled == "enabled" and active == "active" and next_value != "-" else "unhealthy",
-        })
+        else:
+            units.append(render_units(config, workflow))
+        if workflow.weekly_summary.get("enabled"):
+            units.append(render_units(config, workflow, weekly=True))
+        for unit in units:
+            enabled = _unit_state(unit.timer_name, "is-enabled", executor=executor)
+            active = _unit_state(unit.timer_name, "is-active", executor=executor)
+            next_result = _run_systemctl(
+                ["show", unit.timer_name, "--property=NextElapseUSecRealtime", "--value"],
+                executor=executor, check=False,
+            )
+            next_value = (next_result.stdout or "").strip() or "-"
+            result.append({
+                "workflow_id": unit.workflow_id, "schedule": unit.on_calendar,
+                "enabled": enabled, "active": active, "next": next_value,
+                "health": "healthy" if enabled == "enabled" and active == "active" and next_value != "-" else "unhealthy",
+            })
     return result
 
 

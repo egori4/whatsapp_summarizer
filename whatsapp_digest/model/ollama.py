@@ -183,6 +183,24 @@ class OllamaStructuredGateway:
             if (row["text"] or row["caption"]) and not row["deleted"]
         ]
         user_prompt, context_records = _fit_ollama_prompt(workflow, records, context_records)
+        return self.generate_prompt(
+            workflow, system_prompt=BASE_SYSTEM_PROMPT, user_prompt=user_prompt,
+            schema=build_output_schema(workflow),
+            source_records=tuple(records), context_source_records=tuple(context_records),
+        )
+
+    def generate_prompt(
+        self, workflow: WorkflowConfig, *, system_prompt: str, user_prompt: str,
+        schema: dict[str, Any],
+        source_records: tuple[dict[str, str], ...] = (),
+        context_source_records: tuple[dict[str, str], ...] | None = None,
+    ) -> ModelInvocationResult:
+        input_bytes = len(system_prompt.encode("utf-8")) + len(user_prompt.encode("utf-8"))
+        if input_bytes > OLLAMA_MAX_INPUT_UTF8_BYTES:
+            raise HermesGatewayError(
+                f"Ollama input exceeds conservative 32k context safety budget "
+                f"({input_bytes} UTF-8 bytes > {OLLAMA_MAX_INPUT_UTF8_BYTES}); input not truncated"
+            )
         model, reasoning = _resolve_model(workflow)
         endpoint = _native_chat_url(_load_ollama_api())
         payload = {
@@ -190,10 +208,10 @@ class OllamaStructuredGateway:
             "stream": False,
             "think": False,
             "messages": [
-                {"role": "system", "content": BASE_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "format": build_output_schema(workflow),
+            "format": schema,
             "options": {
                 "temperature": 0,
                 "num_ctx": OLLAMA_NUM_CTX,
@@ -258,6 +276,6 @@ class OllamaStructuredGateway:
             provider=OLLAMA_PROVIDER,
             model=model,
             reasoning=reasoning,
-            source_records=tuple(records),
-            context_source_records=tuple(context_records),
+            source_records=source_records,
+            context_source_records=context_source_records,
         )

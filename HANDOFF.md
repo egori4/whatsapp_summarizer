@@ -1,11 +1,45 @@
+## Weekly product-family terminology and email-format refinement (November 9, 2026)
+- A shared, code-owned Radware glossary (`whatsapp_digest/model/product_glossary.py`) is added to both daily and weekly system prompts: DP/DPX, CC/CC+, Cyber Controller variants, CWAAP, major legacy and cloud families. Grouping must not erase exact variants/limits.
+- Weekly has seven categories: Cyber Controller / Management; DefensePro / DefensePro X; Alteon / AppWall; Cloud Security; Other Products & Services; Cross-product Topics; Team Notes. Empty categories are not rendered. Primary-subject classification avoids duplicate or artificial cross-product topics.
+- Weekly presentation is compact: finding, essential supporting details, optional evidence-backed takeaway, explicit follow-ups and open questions, and contacts. Per-item daily evidence dates stay in stored JSON but are not printed; period/coverage metadata is still visible.
+- Daily rendering, recipient configuration, source coverage, weekly delivery ledger and systemd scheduling remain unchanged. The originally delivered November 9 partial report stays immutable.
+- The first November 9 partial report used To-only delivery; parent BCC includes David.Medina@radware.com and will apply to later regular weekly reports. A safe dry run of an already delivered week never emails or replaces the delivery ledger.
+- Preview the first week: `./.venv/bin/python -m whatsapp_digest.cli --config config.yaml weekly global-ps --period 2026-11-02 --dry-run`
+- Regression command: `./.venv/bin/python -m pytest -q`
+
 # WhatsApp Technical Digest — Engineering Handoff
 
-**Last updated:** 2026-09-29  
+**Last updated:** 2026-11-20
 **Host used for production/pilot:** `m920q`  
 **Repository:** `egori4/whatsapp_summarizer`  
-**Current working branch:** `v2.2-ollama-structured-output`
-**Current merged baseline:** v2.1 on `main` at `549e989`
-**Current package version on feature branch:** `2.2.0`
+**Current development branch:** `feature/v2.5.0-weekly-digest` at `/home/egori4/scripts/whatsapp-tech-digest` (the only worktree; production pilot checkout)
+**Production checkout:** m920q runs feature/v2.5.0-weekly-digest (2.5.0) since Nov 4; main remains v2.4.0 / 11e434b
+**Package version:** `2.5.0` (production pilot active on feature branch; `main` still v2.4.0)
+
+## Pre-PR stabilization verification — 2026-11-20
+
+- Production remains on `feature/v2.5.0-weekly-digest` at commit `0c6a580`, with a clean working tree and one worktree. `main` remains v2.4.0 until the PR is merged.
+- Full local regression on `m920q`: **212 tests passed** on November 20. GitHub Actions passed on the feature branch head (`0c6a580`) on November 9; the workflow must pass again on the PR.
+- Both scheduled weekly runs succeeded and reported delivery: November 9 partial pilot (8 evidence items) and November 16 normal weekly report (17 evidence items). Daily deliveries succeeded November 16-20; bridge/collector and timers were active.
+- November 15 daily delivery was rejected by the external SMTP relay (`525 5.7.1 Unauthorized IP address`). The next scheduled run delivered successfully on November 16; later daily deliveries also succeeded. If this recurs, investigate relay/IP authorization rather than assuming a weekly-digest regression.
+- No functionality, model prompt, recipients, or timers were changed during this verification.
+
+## v2.5 release/pilot status — 2026-11-09
+
+- The feature branch `feature/v2.5.0-weekly-digest` is the active checkout on `m920q`; do not describe it as undeployed.
+- Weekly architecture: `V2_5_WEEKLY_DIGEST_ARCHITECTURE.md`.
+- Build/test/DoD: `V2_5_WEEKLY_DIGEST_IMPLEMENTATION_PLAN.md`.
+- New modules: `whatsapp_digest/weekly.py` and weekly-specific tests.
+- New SQLite storage: `daily_digest_artifacts` and `weekly_reports`.
+- Weekly opt-in is `weekly_summary.enabled: true` inside the existing daily workflow.
+- Source validation uses saved daily item IDs; no second group JID, raw rereads, or weekly checkpoint.
+- BCC is inherited in production, but unit and integration fixtures use only
+  `test-recipient@example.com` / `test-blind@example.com`, never real addresses.
+- v2.5 production pilot is active, including the Monday 08:30 weekly timer; daily behavior and BCC remain unchanged. One isolated synthetic SMTP test was sent with no CC/BCC.
+- The first partial weekly pilot is configured for November 9, 2026 (November 2 period key). It reports available saved Nov 5-9 digests only, requires Monday daily completion, labels the email PARTIAL, and suppresses CC/BCC for the pilot only. Full normal weekly coverage resumes November 16.
+- Core regression + weekly acceptance: **212 tests passed** on November 9. A production-data weekly dry run succeeded with the final product-family layout; no email was sent for this final validation.
+- This handoff also retains historical v2.0-v2.2 notes below; those earlier
+  branch/status descriptions are historical, not the present working state.
 
 ## 1. What this project does
 
@@ -47,9 +81,9 @@ v2.1 was merged to `main` in PR #1 at merge commit:
 
 It includes historical context lookback, backward-compatible config upgrade behavior, updated architecture/handoff documentation, and local/custom Hermes provider model-switching guidance.
 
-### v2.2 feature branch
+### v2.2 historical implementation
 
-Current work is isolated on:
+The earlier v2.2 work was isolated on:
 
 ```text
 v2.2-ollama-structured-output

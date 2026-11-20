@@ -100,6 +100,15 @@ def test_prompt_injection_remains_inside_untrusted_source_json():
 
 
 
+def test_daily_prompt_uses_shared_radware_glossary_without_changing_output_schema():
+    from whatsapp_digest.model.product_glossary import RADWARE_PRODUCT_TERMINOLOGY
+    assert BASE_SYSTEM_PROMPT.startswith(RADWARE_PRODUCT_TERMINOLOGY)
+    assert "DP = DefensePro" in BASE_SYSTEM_PROMPT
+    assert "CC+ = Cyber Controller Plus" in BASE_SYSTEM_PROMPT
+    assert "Retain the EXACT product/edition/model/version" in BASE_SYSTEM_PROMPT
+    assert '"takeaway"' not in BASE_SYSTEM_PROMPT
+
+
 def test_system_prompt_handles_off_channel_follow_up_without_overclaiming_unresolved():
     assert "Absence of an explicit answer in WhatsApp is not by itself evidence" in BASE_SYSTEM_PROMPT
     assert "do not infer its contents or outcome" in BASE_SYSTEM_PROMPT
