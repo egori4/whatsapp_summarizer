@@ -263,7 +263,7 @@ def test_coverage_and_successful_weekly_delivery(cfg):
     seed_week(cfg)
     gateway, email = FakeGateway(), FakeDelivery()
     result = run_weekly(cfg, "global-ps", now=NOW, gateway=gateway, delivery=email)
-    assert result.status == "weekly-delivered"
+    assert result.status == "weekly-smtp-accepted"
     assert result.message_count == 6
     assert gateway.called == 1
     assert gateway.workflow.sections[0].id == "cyber_controller"
@@ -281,7 +281,7 @@ def test_coverage_and_successful_weekly_delivery(cfg):
         assert db.workflow_state("global-ps")["initialized"] == 0
         assert db._conn.execute(
             "SELECT status FROM runs WHERE run_id=?", (result.run_id,)
-        ).fetchone()[0] == "weekly-delivered"
+        ).fetchone()[0] == "weekly-smtp-accepted"
 
 
 def test_weekly_second_run_is_idempotent(cfg):
@@ -338,7 +338,7 @@ def test_missing_current_monday_fails_closed(cfg):
 def test_missing_intermediate_day_with_catchup_contiguous_passes(cfg):
     seed_week(cfg, only_days=[1, 7])
     result = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=FakeDelivery())
-    assert result.status == "weekly-delivered"
+    assert result.status == "weekly-smtp-accepted"
 
 
 def test_broken_chain_fails_closed(cfg):
@@ -355,7 +355,7 @@ def test_other_workflow_artifact_not_selected(cfg):
     with DigestDatabase(cfg.database_path) as db:
         seed_artifact(db, "foreign", date(2026, 11, 5), 0, 99, workflow="foreign")
     result = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=FakeDelivery())
-    assert result.status == "weekly-delivered" and result.message_count == 6
+    assert result.status == "weekly-smtp-accepted" and result.message_count == 6
 
 
 def test_monday_after_cutoff_not_included(cfg):
@@ -370,7 +370,7 @@ def test_successful_empty_week_is_delivered_without_model(cfg):
     seed_week(cfg, content=False)
     gateway, email = FakeGateway(), FakeDelivery()
     result = run_weekly(cfg, "global-ps", now=NOW, gateway=gateway, delivery=email)
-    assert result.status == "weekly-delivered" and result.message_count == 0
+    assert result.status == "weekly-smtp-accepted" and result.message_count == 0
     assert gateway.called == 0
     assert "No material updates" in email.sent[0][1]["text"]
 
@@ -420,7 +420,7 @@ def test_weekly_merges_multiple_cited_days(cfg):
     ids = ["daily:day1:technical_updates:0", "daily:day5:technical_updates:0"]
     fake = FakeGateway(weekly_output(ids))
     result = run_weekly(cfg, "global-ps", now=NOW, gateway=fake, delivery=FakeDelivery())
-    assert result.status == "weekly-delivered"
+    assert result.status == "weekly-smtp-accepted"
     assert len(result.digest["sections"][0]["items"]) == 1
     assert result.digest["sections"][0]["items"][0]["evidence_dates"] == ["2026-11-03", "2026-11-07"]
 
@@ -521,7 +521,7 @@ def test_weekly_smtp_failure_retry(cfg):
     with DigestDatabase(cfg.database_path) as db:
         assert db.weekly_report("global-ps", "2026-11-02") is None
     retry = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=FakeDelivery())
-    assert retry.status == "weekly-delivered"
+    assert retry.status == "weekly-smtp-accepted"
 
 
 def test_oversized_weekly_input_fails_without_truncation(cfg):
@@ -585,7 +585,7 @@ def test_partial_first_week_no_anchor_is_delivered_to_primary_only(partial_cfg):
     seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
     gateway, email = FakeGateway(), FakeDelivery()
     result = run_weekly(partial_cfg, "global-ps", now=NOW, gateway=gateway, delivery=email)
-    assert result.status == "weekly-delivered"
+    assert result.status == "weekly-smtp-accepted"
     assert result.message_count == 5
     assert len(email.sent) == 1
     target, kwargs = email.sent[0]
@@ -610,7 +610,7 @@ def test_partial_first_week_idempotent(partial_cfg):
     seed_week(partial_cfg, include_anchor=False, only_days=[3, 4, 5, 6, 7])
     email = FakeDelivery()
     assert run_weekly(partial_cfg, "global-ps", now=NOW, gateway=FakeGateway(),
-                      delivery=email).status == "weekly-delivered"
+                      delivery=email).status == "weekly-smtp-accepted"
     second, second_email = FakeGateway(), FakeDelivery()
     assert run_weekly(partial_cfg, "global-ps", now=NOW, gateway=second,
                       delivery=second_email).status == "already-delivered"
@@ -671,7 +671,7 @@ def test_next_week_requires_anchor_and_uses_normal_bcc(partial_cfg):
     gateway, email = FakeGateway(), FakeDelivery()
     result = run_weekly(partial_cfg, "global-ps", period="2026-11-09", now=now,
                         gateway=gateway, delivery=email)
-    assert result.status == "weekly-delivered"
+    assert result.status == "weekly-smtp-accepted"
     assert "PARTIAL" not in email.sent[0][1]["subject"]
     assert "PARTIAL" not in email.sent[0][1]["text"]
     assert email.sent[0][0].email["bcc"] == ["test-blind@example.com"]
@@ -718,3 +718,19 @@ def test_config_to_only_flag_requires_named_partial_week(tmp_path):
     ))
     with pytest.raises(ConfigError, match="requires first_partial_week"):
         load_config(path)
+
+
+def test_weekly_bcc_override_does_not_change_daily_recipients(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(CONFIG.replace(
+        "    weekly_summary:\n      enabled: true\n",
+        "    weekly_summary:\n      enabled: true\n      email:\n        bcc: [weekly-only@example.com]\n",
+    ))
+    cfg = load_config(path)
+    seed_week(cfg)
+    email = FakeDelivery()
+    result = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=email)
+    assert result.status == "weekly-smtp-accepted"
+    assert email.sent[0][0].email["bcc"] == ["weekly-only@example.com"]
+    assert cfg.workflow("global-ps").email["bcc"] == ["test-blind@example.com"]
+    assert email.sent[0][0].email["to"] == cfg.workflow("global-ps").email["to"]

@@ -193,3 +193,31 @@ def test_refused_recipient_is_reported_as_delivery_failure(tmp_path, monkeypatch
     monkeypatch.setenv("DIGEST_PASSWORD", "secret")
     with pytest.raises(DeliveryError, match="two@example.com"):
         EmailDelivery(cfg, smtp_factory=RefusingSMTP).send_test(cfg.workflow("tests"))
+
+
+def test_headers_unique_and_data_reply_logged(tmp_path, monkeypatch, caplog):
+    import logging
+    from email.utils import parsedate_to_datetime
+
+    class ConfirmingSMTP(FakeSMTP):
+        def send_message(self, message, to_addrs):
+            super().send_message(message, to_addrs)
+            self.data_reply = (250, b"2.0.0 OK: queued as <provider-id>")
+            return {}
+
+    cfg = make_config(tmp_path)
+    monkeypatch.setenv("DIGEST_PASSWORD", "secret")
+    caplog.set_level(logging.INFO)
+    delivery = EmailDelivery(cfg, smtp_factory=ConfirmingSMTP)
+    workflow = cfg.workflow("tests")
+    delivery.send_test(workflow)
+    first = ConfirmingSMTP.instances[-1].sent
+    delivery.send_test(workflow)
+    second = ConfirmingSMTP.instances[-1].sent
+    assert parsedate_to_datetime(first["Date"]).tzinfo is not None
+    assert first["Message-ID"] != second["Message-ID"]
+    assert str(first["Message-ID"]).endswith("@example.com>")
+    assert "queued as <provider-id>" in caplog.text
+    assert "code=250" in caplog.text
+    assert "inbox_delivery=unverified" in caplog.text
+    assert "secret" not in caplog.text

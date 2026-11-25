@@ -22,6 +22,10 @@ from .model.product_glossary import RADWARE_PRODUCT_TERMINOLOGY
 from .renderer import RenderContext, render_digest
 from .runner import RunResult, RunnerError, _notify_failure
 from .validation import DigestValidationError, validate_weekly_digest
+from .weekly_resolution import (
+    HISTORY_DAYS, RESOLUTION_SECTIONS, SYSTEM_PROMPT as RESOLUTION_PROMPT,
+    raw_evidence, resolution_prompt, resolution_schema, validate_resolution,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -300,50 +304,63 @@ def run_weekly(
                     )
                     return RunResult(run_id, workflow.id, coverage_error, 0, 0, None, None)
                 partial = _is_first_partial_week(db, workflow, period_info)
-                # Only this named bootstrap report may suppress CC/BCC.
-                # Daily sends always use the unmodified parent workflow.
-                recipient_workflow = (
-                    replace(workflow, email={**workflow.email, "cc": [], "bcc": []})
-                    if partial and workflow.weekly_summary.get("first_partial_week_to_only")
-                    else workflow
-                )
+                # Weekly recipient overrides never modify the daily parent workflow.
+                weekly_email = {**workflow.email, **workflow.weekly_summary.get("email", {})}
+                if partial and workflow.weekly_summary.get("first_partial_week_to_only"):
+                    weekly_email.update(cc=[], bcc=[])
+                recipient_workflow = replace(workflow, email=weekly_email)
                 last_checkpoint = int(artifacts[-1]["checkpoint_after"])
                 window_starts = [a["window_start"] for a in artifacts if a["window_start"]]
                 window_ends = [a["window_end"] for a in artifacts if a["window_end"]]
                 first_message = min(window_starts) if window_starts else None
                 last_message = max(window_ends) if window_ends else None
+                hybrid = workflow.weekly_summary.get("evidence_mode") == "hybrid"
+                current_rows, history_rows = [], []
+                source_count = 0
                 provider = model_name = reasoning = "not-required"
                 try:
                     cards = build_evidence_cards(artifacts, workflow)
                     digest = {"sections": []}
-                    if cards:
-                        user_prompt = _prompt(cards, period_info, partial=partial)
+                    if hybrid:
+                        current_rows, history_rows = raw_evidence(db, workflow, artifacts, period_info)
+                    source_count = len(current_rows) if hybrid else len(cards)
+                    db.set_run_message_count(run_id, source_count)
+                    if source_count:
+                        user_prompt = (
+                            resolution_prompt(cards, current_rows, history_rows, period_info, partial=partial)
+                            if hybrid else _prompt(cards, period_info, partial=partial)
+                        )
                         if len(user_prompt) > MAX_PROMPT_CHARS:
                             raise HermesGatewayError(
                                 f"weekly prompt exceeds safe input limit ({len(user_prompt)} > {MAX_PROMPT_CHARS})"
                             )
-                        weekly_workflow = replace(workflow, sections=WEEKLY_SECTIONS)
+                        weekly_workflow = replace(workflow, sections=RESOLUTION_SECTIONS if hybrid else WEEKLY_SECTIONS)
                         model_gateway = gateway or (
                             OllamaStructuredGateway(config)
                             if workflow.model["provider"] == "ollama-local"
                             else HermesModelGateway(config)
                         )
                         response: ModelInvocationResult = model_gateway.generate_prompt(
-                            weekly_workflow, system_prompt=WEEKLY_SYSTEM_PROMPT,
-                            user_prompt=user_prompt, schema=_weekly_output_schema(weekly_workflow),
+                            weekly_workflow, system_prompt=RESOLUTION_PROMPT if hybrid else WEEKLY_SYSTEM_PROMPT,
+                            user_prompt=user_prompt,
+                            schema=resolution_schema(weekly_workflow) if hybrid else _weekly_output_schema(weekly_workflow),
                         )
                         provider, model_name, reasoning = response.provider, response.model, response.reasoning
-                        digest = validate_weekly_digest(response.raw_output, cards, SECTION_TITLES)
-                        section_order = {part.id: index for index, part in enumerate(WEEKLY_SECTIONS)}
-                        digest["sections"].sort(key=lambda part: section_order[part["section_id"]])
-                        card_index = {card["source_id"]: card for card in cards}
-                        # Dates are derived from verified citations, never written by the model.
-                        for section in digest["sections"]:
-                            for item in section["items"]:
-                                item["evidence_dates"] = sorted({
-                                    card_index[source_id]["digest_date"]
-                                    for source_id in item["source_ids"]
-                                })
+                        if hybrid:
+                            digest = validate_resolution(response.raw_output, current_rows, history_rows, workflow)
+                            if not db.sources_are_fresh([*current_rows, *history_rows]):
+                                raise RunnerError("weekly raw evidence changed during analysis; retry required")
+                        else:
+                            digest = validate_weekly_digest(response.raw_output, cards, SECTION_TITLES)
+                            section_order = {part.id: index for index, part in enumerate(WEEKLY_SECTIONS)}
+                            digest["sections"].sort(key=lambda part: section_order[part["section_id"]])
+                            card_index = {card["source_id"]: card for card in cards}
+                            for section in digest["sections"]:
+                                for item in section["items"]:
+                                    item["evidence_dates"] = sorted({
+                                        card_index[source_id]["digest_date"]
+                                        for source_id in item["source_ids"]
+                                    })
                     first_day = _parse_utc(artifacts[0]["completed_at"]).astimezone(zone).date().isoformat()
                     report_period = (
                         f"PARTIAL - saved daily digests {first_day} to {period_info.week_end.isoformat()} "
@@ -357,7 +374,10 @@ def run_weekly(
                         workflow_name=workflow.name, workflow_id=workflow.id,
                         run_id=run_id, generated_at=current.astimezone(zone),
                         timezone=workflow.timezone, provider=provider, model=model_name,
-                        reasoning=reasoning, message_count=len(cards),
+                        reasoning=reasoning, message_count=source_count,
+                        context_count=len(history_rows),
+                        context_lookback=f"{HISTORY_DAYS}d (best effort)" if hybrid else None,
+                        weekly_daily_card_count=len(cards) if hybrid else None,
                         window_start=first_message, window_end=last_message,
                         weekly_period=report_period,
                         weekly_label=_human_period(
@@ -388,7 +408,7 @@ def run_weekly(
                     db.finish_run(run_id, status="weekly-dry-run-success",
                                   provider=provider, model=model_name, reasoning=reasoning)
                     return RunResult(
-                        run_id, workflow.id, "weekly-dry-run-success", len(cards),
+                        run_id, workflow.id, "weekly-dry-run-success", source_count,
                         last_checkpoint, first_message, last_message,
                         provider=provider, model=model_name, reasoning=reasoning,
                         digest=digest, rendered_text=rendered.text, rendered_html=rendered.html,
@@ -423,7 +443,7 @@ def run_weekly(
                 except Exception as exc:
                     logger.warning("weekly digest retention failed: %s", type(exc).__name__)
                 return RunResult(
-                    run_id, workflow.id, "weekly-delivered", len(cards),
+                    run_id, workflow.id, "weekly-smtp-accepted", source_count,
                     last_checkpoint, first_message, last_message,
                     provider=provider, model=model_name, reasoning=reasoning,
                     digest=digest, rendered_text=rendered.text, rendered_html=rendered.html,

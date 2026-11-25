@@ -526,7 +526,7 @@ def _run_workflow_unlocked(
             run_id,
             workflow.id,
             cutoff,
-            status="delivered",
+            status="smtp-accepted",
             provider=model_result.provider,
             model=model_result.model,
             reasoning=model_result.reasoning,
@@ -535,7 +535,7 @@ def _run_workflow_unlocked(
             checkpoint_before=checkpoint if workflow.weekly_summary["enabled"] and explicit_since is None else None,
         )
         logger.info(
-            "[%s] checkpoint advanced run_id=%s checkpoint=%s status=delivered",
+            "[%s] checkpoint advanced run_id=%s checkpoint=%s status=smtp-accepted",
             workflow.id,
             run_id,
             cutoff,
@@ -544,7 +544,7 @@ def _run_workflow_unlocked(
         return RunResult(
             run_id=run_id,
             workflow_id=workflow.id,
-            status="delivered",
+            status="smtp-accepted",
             message_count=len(usable),
             cutoff_seq=cutoff,
             window_start=window_start,

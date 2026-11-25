@@ -336,14 +336,14 @@ def test_successful_delivery_advances_exactly_to_cutoff(tmp_path):
         gateway=FakeGateway(material_output()), delivery=delivery,
     )
 
-    assert result.status == "delivered"
+    assert result.status == "smtp-accepted"
     assert len(delivery.digests) == 1
     assert delivery.digests[0][1]["subject"] == "[Digest] 2026-09-27 — Tests"
     with DigestDatabase(cfg.database_path) as db:
         state = db.workflow_state("tests")
         assert state["initialized"] == 1
         assert state["checkpoint_seq"] == cutoff
-        assert state["last_run_status"] == "delivered"
+        assert state["last_run_status"] == "smtp-accepted"
 
 
 def test_delivery_failure_never_advances_checkpoint(tmp_path):

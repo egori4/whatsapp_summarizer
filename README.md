@@ -10,7 +10,8 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 - [Status](#status)
 - [Architecture](#architecture)
-- [Weekly roll-up v2.5](#weekly-roll-up-v25)
+- [Weekly resolution analysis v2.6](#weekly-resolution-analysis-v26)
+- [Weekly roll-up v2.5 (legacy)](#weekly-roll-up-v25)
 - [Safety model](#safety-model)
 - [Prerequisites](#prerequisites)
 - [Initial installation](#initial-installation)
@@ -30,14 +31,14 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.5.0 (deployed pilot on `feature/v2.5.0-weekly-digest`; `main` remains v2.4.0 until merged)
+**Version:** 2.6.0 (feature branch; stable production is v2.5.0 on main until rollout)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
 **WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
 **Delivery:** SMTP email
 
-v2.5 adds an **optional weekly digest of persisted daily summaries**. The v2.5 feature branch is running as a production pilot on `m920q` (daily and Monday 08:30 ET weekly timers). This release tag identifies the validated v2.5.0 code on that branch; merging to `main` and pushing the tag are separate operations. Other workflow behavior is unchanged when the weekly option is disabled.
+v2.5 added optional weekly consolidation of persisted daily summaries and was merged into main on November 25, 2026. Production on `m920q` continues with the same daily and Monday 08:30 ET timers. v2.6 adds opt-in raw-first weekly analysis, leaving daily behavior unchanged. Existing configs without the new option keep v2.5 weekly behavior.
 
 ### v2.5.0 release summary (2026-11-09)
 
@@ -97,9 +98,57 @@ Hermes may continue running its normal gateway for Telegram or other integration
 
 ---
 
+## Weekly resolution analysis v2.6
+
+Use the hybrid mode to produce **Resolved Issues** and **Unresolved Issues**,
+with product families as subheadings. The model independently analyzes all
+usable raw messages for the canonical weekly checkpoint range; daily digests
+are topic hints, never proof. An optional three-day historical context is
+best effort. Confirmed fixes, answers and useful technical findings require
+a concrete resolution and current raw evidence; proposed, partial and
+unanswered questions remain unresolved. A concrete technical answer does not need
+follow-up confirmation from the asker. Only explicitly tentative/inconclusive
+responses are labeled Suggested approach; missing feedback alone is not enough.
+The weekly header shows deterministic resolved and unresolved issue counts.
+
+To enable, edit the existing local config (keep every other setting):
+
+```yaml
+retention:
+  processed_raw_days: 14
+  digest_days: 30
+
+workflows:
+  - id: global-ps
+    weekly_summary:
+      enabled: true
+      evidence_mode: hybrid
+      schedule:
+        type: weekly
+        days: [mon]
+        at: "08:30"
+```
+
+`daily_cards` (default for existing configs) retains the v2.5 layout/analysis.
+Set it explicitly to roll back without changing daily behavior or timers.
+Hybrid mode requires at least 14 days of raw retention; raising retention
+cannot restore old purged messages. Current raw counts are reconciled against
+each canonical daily run. Missing, edited-away or deleted evidence causes a
+source failure before AI/digest delivery rather than silent fallback or
+truncation. Historical context is best effort and coverage is of collected,
+usable raw messages, not the entire upstream conversation. An older report
+may be unreplayable. The previous Monday anchor and delivery ledger still apply.
+
+Dry-run on a copy of the database with isolated recipients. The CLI commands
+below work in either mode. No extra weekly model call is required. Keep
+`--dry-run` for historical replay; use a separate, explicitly To-only preview
+if testing SMTP. The original delivery ledger is never rewritten for tests.
+
+See [v2.6 design and acceptance](V2_6_WEEKLY_RESOLUTION_ANALYSIS.md).
+
 ## Weekly roll-up v2.5
 
-Weekly is a **downstream consolidation of the validated daily digests**, not another
+The legacy `daily_cards` mode is a **downstream consolidation of the validated daily digests**, not another
 WhatsApp collector, raw-message replay, group workflow, or checkpoint. Existing
 daily digests are sent as before. When weekly is enabled, every successful,
 checkpoint-driven, real daily completion also saves validated JSON in local SQLite
@@ -198,7 +247,7 @@ history is backfilled for November 2-4.
 The November 9 email will say PARTIAL in the subject and body, and its metadata
 will show the first actual saved digest date. The To-only option suppresses
 CC/BCC for this one partial pilot, including its failure notice. Daily BCC and
-later complete weekly emails retain the original configured recipients.
+later complete weekly emails retain the configured weekly recipients. By default weekly recipients inherit daily To/Cc/Bcc. Set individual lists under `weekly_summary.email` (for example `bcc: [weekly-reader@example.com]`) to override only weekly delivery; omitted lists inherit the daily values.
 
 From November 16, the selector again requires the normal predecessor anchor.
 The special setting can be removed after the first pilot; normal weekly
@@ -207,7 +256,7 @@ operation and idempotent delivery continue.
 ### Weekly commands
 
 ```bash
-# On v2.5 deployment; does not enable a timer by itself:
+# Validate either weekly evidence mode; does not enable a timer by itself:
 digest --config ./config.yaml config validate
 
 # Preview only (never sends mail / moves checkpoint / marks delivered):
@@ -924,6 +973,26 @@ This switch is intended only for troubleshooting model formatting/schema problem
 
 ---
 
+## Resend a retained daily digest
+
+Use the original canonical daily run ID (available in the application logs).
+With the normal SMTP environment loaded:
+
+```bash
+digest --config ./config.yaml resend <run-id> --dry-run
+digest --config ./config.yaml resend <run-id>
+```
+
+The resend uses the saved validated summary, does not invoke a model, and does not
+write to the runs, daily/weekly ledgers, or processing checkpoints. It sends to
+configured To recipients only by default; add `--all-recipients` to include Cc/Bcc.
+If configured, the raw attachment is reconstructed from retained source rows and
+marked as reconstructed, not a byte-exact original; historical context may differ.
+If the current source window is incomplete or expired, use `--without-raw` to
+send only the saved summary. Only retained canonical material daily artifacts
+(currently captured for weekly-enabled workflows) are supported; failed original
+runs and weekly reports are not resubmitted by this command.
+
 ## Run statuses
 
 Common statuses:
@@ -934,12 +1003,12 @@ Common statuses:
 | `success-no-pending` | No pending rows; checkpoint/baseline remains successful. |
 | `success-no-usable` | Pending changes existed but none contained usable text/caption. |
 | `success-no-material` | Model/validation succeeded but there was nothing worth emailing. Checkpoint advanced. |
-| `delivered` | SMTP accepted the material digest and checkpoint advanced. |
+| `smtp-accepted` | SMTP accepted the material digest and checkpoint advanced; inbox delivery unverified. |
 | `dry-run-success` | Preview generated successfully; checkpoint unchanged. |
 | `dry-run-no-material-updates` | Valid preview contained no material items; checkpoint unchanged. |
 | `failed` | Model, validation, freshness, rendering, or delivery failed; checkpoint did not advance. |
 
-`delivered` means accepted by the configured SMTP server, not guaranteed inbox delivery.
+Historical `delivered` and `weekly-delivered` records mean SMTP accepted, not confirmed inbox delivery. New runs use `smtp-accepted` and `weekly-smtp-accepted`. The weekly period ledger remains compatible. SMTP logs include a unique Message-ID, the final DATA response (including the relay queue ID if provided), and explicit inbox-delivery-unverified status. No Brevo API delivery confirmation is performed.
 
 There is an unavoidable at-least-once edge case: if SMTP accepts a message and the process crashes before the local success/checkpoint transaction commits, a retry may send a duplicate. The system favors not losing a digest over pretending SMTP provides exactly-once semantics.
 

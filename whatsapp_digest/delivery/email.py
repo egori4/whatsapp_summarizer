@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.utils import format_datetime, make_msgid, parseaddr
 import logging
 import os
 import smtplib
@@ -14,12 +15,22 @@ from ..config import AppConfig, WorkflowConfig
 logger = logging.getLogger(__name__)
 
 
+class ReceiptSMTP(smtplib.SMTP):
+    """Capture the final DATA reply without logging SMTP credentials or message content."""
+
+    data_reply: tuple[int, bytes] | None = None
+
+    def data(self, msg):
+        self.data_reply = super().data(msg)
+        return self.data_reply
+
+
 class EmailDelivery:
     def __init__(
         self,
         config: AppConfig,
         *,
-        smtp_factory: Callable[..., Any] = smtplib.SMTP,
+        smtp_factory: Callable[..., Any] = ReceiptSMTP,
     ):
         self.config = config
         self._smtp_factory = smtp_factory
@@ -34,6 +45,12 @@ class EmailDelivery:
         if cfg.get("username") and password is None:
             raise DeliveryError(f"SMTP password environment variable is not set: {password_env}")
 
+        if not message.get("Date"):
+            message["Date"] = format_datetime(datetime.now(timezone.utc))
+        if not message.get("Message-ID"):
+            sender_domain = parseaddr(cfg["sender"])[1].rpartition("@")[2] or None
+            message["Message-ID"] = make_msgid(domain=sender_domain)
+        message_id = str(message["Message-ID"])
         run_id = message.get("X-WhatsApp-Digest-Run-ID", "unknown")
         logger.info(
             "smtp connect run_id=%s host=%s port=%s starttls=%s username_set=%s sender=%s recipients=%s",
@@ -45,6 +62,7 @@ class EmailDelivery:
             cfg["sender"],
             ",".join(recipients),
         )
+        reply = None
         try:
             with self._smtp_factory(
                 cfg["host"],
@@ -58,6 +76,14 @@ class EmailDelivery:
                 if cfg.get("username"):
                     smtp.login(cfg["username"], password or "")
                 refused = smtp.send_message(message, to_addrs=recipients)
+                reply = getattr(smtp, "data_reply", None)
+                if reply is not None:
+                    code, response = reply
+                    safe_response = response.decode("utf-8", errors="replace") if isinstance(response, bytes) else str(response)
+                    logger.info(
+                        "smtp DATA reply run_id=%s message_id=%s code=%s response=%r",
+                        run_id, message_id, code, safe_response[:500],
+                    )
                 if refused:
                     refused_list = ",".join(sorted(str(address) for address in refused))
                     logger.error(
@@ -77,9 +103,10 @@ class EmailDelivery:
             raise DeliveryError(f"SMTP delivery failed: {type(exc).__name__}: {exc}") from exc
 
         logger.info(
-            "smtp accepted run_id=%s recipient_count=%d",
+            "smtp accepted run_id=%s recipient_count=%d message_id=%s inbox_delivery=unverified",
             run_id,
             len(recipients),
+            message_id,
         )
 
     def send_digest(

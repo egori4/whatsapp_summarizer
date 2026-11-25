@@ -24,6 +24,7 @@ class RenderContext:
     context_lookback: str | None = None
     weekly_period: str | None = None
     weekly_label: str | None = None
+    weekly_daily_card_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,8 @@ def _metadata_lines(context: RenderContext) -> list[str]:
         f"Provider: {context.provider}",
         f"Model: {context.model}",
         f"Reasoning: {context.reasoning}",
-        f"{'Daily evidence items' if context.weekly_period else 'Messages processed'}: {context.message_count}",
+        f"{'Raw messages analyzed' if context.weekly_daily_card_count is not None else 'Daily evidence items' if context.weekly_period else 'Messages processed'}: {context.message_count}",
+        *([f"Daily digest hints: {context.weekly_daily_card_count}"] if context.weekly_daily_card_count is not None else []),
         f"Context: {context.context_count} prior messages ({context.context_lookback} lookback)" if context.context_lookback else "Context: disabled",
         f"Window: {window}",
         f"Run ID: {context.run_id}",
@@ -58,11 +60,28 @@ def _append_text_list(lines: list[str], label: str, values: list[str]) -> None:
         lines.append(f"  - {value}")
 
 
+def _visible_sections(digest: dict[str, Any], context: RenderContext) -> list[dict[str, Any]]:
+    sections = digest.get("sections") or []
+    if context.weekly_daily_card_count is None:
+        return sections
+    by_id = {part["section_id"]: part for part in sections}
+    return [by_id.get(key, {"section_id": key, "title": title, "items": []})
+            for key, title in (("resolved", "Resolved Issues"), ("unresolved", "Unresolved Issues"))]
+
+
+def _weekly_issue_counts(sections: list[dict[str, Any]]) -> tuple[int, int]:
+    counts = {section["section_id"]: len(section.get("items") or []) for section in sections}
+    return counts.get("resolved", 0), counts.get("unresolved", 0)
+
+
 def render_text(digest: dict[str, Any], context: RenderContext) -> str:
     heading = (f"{context.workflow_name}: {context.weekly_label or context.weekly_period}"
                if context.weekly_period else f"{context.workflow_name} — {context.generated_at:%Y-%m-%d}")
     lines = [heading]
-    sections = digest.get("sections") or []
+    sections = _visible_sections(digest, context)
+    if context.weekly_daily_card_count is not None:
+        resolved, unresolved = _weekly_issue_counts(sections)
+        lines.extend(["", f"Resolved issues: {resolved} | Unresolved issues: {unresolved}"])
     if not sections:
         lines.extend(["", "No material updates."])
         lines.extend(["", "---", *_metadata_lines(context)])
@@ -70,13 +89,24 @@ def render_text(digest: dict[str, Any], context: RenderContext) -> str:
 
     for section in sections:
         items = section.get("items") or []
-        if not items:
+        if not items and context.weekly_daily_card_count is None:
             continue
         lines.extend(["", section["title"]])
         lines.append("=" * len(section["title"]))
+        if not items:
+            lines.append("None identified in the available evidence.")
+        last_product = None
         for item in items:
             if context.weekly_period:
+                product = item.get("product_title")
+                if product and product != last_product:
+                    lines.extend(["", product])
+                    last_product = product
                 lines.extend(["", f"• {item['title']}: {item['summary']}"])
+                if item.get("resolution"):
+                    lines.append(f"  Resolution: {item['resolution']}")
+                elif item.get("status_label"):
+                    lines.append(f"  Status: {item['status_label']}")
                 for detail in item.get("details") or []:
                     lines.append(f"  - {detail}")
                 if item.get("takeaway"):
@@ -120,19 +150,32 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
         for line in _metadata_lines(context)
     )
     section_html: list[str] = []
-    sections = digest.get("sections") or []
+    sections = _visible_sections(digest, context)
     for section in sections:
         items = section.get("items") or []
         if not items:
+            if context.weekly_daily_card_count is not None:
+                section_html.append(f"<section><h2>{escape(section['title'])}</h2><p>None identified in the available evidence.</p></section>")
             continue
         item_html: list[str] = []
+        last_product = None
         for item in items:
             names = list(dict.fromkeys((item.get("reported_by") or []) + (item.get("contributors") or [])))
             if context.weekly_period:
+                product = item.get("product_title")
+                if product and product != last_product:
+                    if last_product is not None:
+                        item_html.append("</ul>")
+                    item_html.append(f'<h3>{escape(product)}</h3><ul class="weekly-topics">')
+                    last_product = product
                 parts = [
                     '<li class="weekly-item"><div><strong>',
                     escape(item["title"]), ":</strong> ", escape(item["summary"]), "</div>",
                 ]
+                if item.get("resolution"):
+                    parts.append(f'<div><strong>Resolution:</strong> {escape(item["resolution"])}</div>')
+                elif item.get("status_label"):
+                    parts.append(f'<div><strong>Status:</strong> {escape(item["status_label"])}</div>')
                 for detail in item.get("details") or []:
                     parts.append(f'<div class="weekly-detail">{escape(detail)}</div>')
                 if item.get("takeaway"):
@@ -164,14 +207,25 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
                 + "".join(extras)
                 + "</article>"
             )
-        wrapper_start = '<ul class="weekly-topics">' if context.weekly_period else ""
-        wrapper_end = "</ul>" if context.weekly_period else ""
+        if last_product is not None:
+            item_html.append("</ul>")
+        wrap_items = context.weekly_period and last_product is None
+        wrapper_start = '<ul class="weekly-topics">' if wrap_items else ""
+        wrapper_end = "</ul>" if wrap_items else ""
         section_html.append(
             f"<section><h2>{escape(section['title'])}</h2>"
             + wrapper_start + "".join(item_html) + wrapper_end + "</section>"
         )
 
     body = "".join(section_html) if section_html else "<p><strong>No material updates.</strong></p>"
+    overview = ""
+    if context.weekly_daily_card_count is not None:
+        resolved, unresolved = _weekly_issue_counts(sections)
+        overview = (
+            '<p style="margin:0 0 18px;padding:12px 14px;background:#f4f6f8;border:1px solid #dce1e5;">'
+            f'<strong>Resolved issues: {resolved}</strong>&nbsp;&nbsp;|&nbsp;&nbsp;'
+            f'<strong>Unresolved issues: {unresolved}</strong></p>'
+        )
     heading = (f"{context.workflow_name}: {context.weekly_label or context.weekly_period}"
                if context.weekly_period else f"{context.workflow_name} — {context.generated_at:%Y-%m-%d}")
     return (
@@ -184,7 +238,7 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
         "h2{margin-top:28px;border-bottom:1px solid #ddd;padding-bottom:5px}h3{margin-bottom:5px}"
         "article{margin-bottom:18px}.weekly-topics{padding-left:20px}.weekly-item{margin:0 0 14px}.weekly-item div{margin-bottom:3px}.weekly-detail{color:#444}.takeaway{padding-left:8px}ul{margin-top:4px}.contacts{font-size:13px;color:#555;margin-top:6px}.metadata{margin-top:24px;color:#666;font-size:12px}"
         "</style></head><body>"
-        f"<h2>{escape(heading)}</h2>{body}<div class=\"metadata\"><table>{metadata}</table></div>"
+        f"<h2>{escape(heading)}</h2>{overview}{body}<div class=\"metadata\"><table>{metadata}</table></div>"
         "</body></html>\n"
     )
 
