@@ -718,3 +718,19 @@ def test_config_to_only_flag_requires_named_partial_week(tmp_path):
     ))
     with pytest.raises(ConfigError, match="requires first_partial_week"):
         load_config(path)
+
+
+def test_weekly_bcc_override_does_not_change_daily_recipients(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(CONFIG.replace(
+        "    weekly_summary:\n      enabled: true\n",
+        "    weekly_summary:\n      enabled: true\n      email:\n        bcc: [weekly-only@example.com]\n",
+    ))
+    cfg = load_config(path)
+    seed_week(cfg)
+    email = FakeDelivery()
+    result = run_weekly(cfg, "global-ps", now=NOW, gateway=FakeGateway(), delivery=email)
+    assert result.status == "weekly-smtp-accepted"
+    assert email.sent[0][0].email["bcc"] == ["weekly-only@example.com"]
+    assert cfg.workflow("global-ps").email["bcc"] == ["test-blind@example.com"]
+    assert email.sent[0][0].email["to"] == cfg.workflow("global-ps").email["to"]

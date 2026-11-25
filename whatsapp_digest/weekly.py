@@ -304,13 +304,11 @@ def run_weekly(
                     )
                     return RunResult(run_id, workflow.id, coverage_error, 0, 0, None, None)
                 partial = _is_first_partial_week(db, workflow, period_info)
-                # Only this named bootstrap report may suppress CC/BCC.
-                # Daily sends always use the unmodified parent workflow.
-                recipient_workflow = (
-                    replace(workflow, email={**workflow.email, "cc": [], "bcc": []})
-                    if partial and workflow.weekly_summary.get("first_partial_week_to_only")
-                    else workflow
-                )
+                # Weekly recipient overrides never modify the daily parent workflow.
+                weekly_email = {**workflow.email, **workflow.weekly_summary.get("email", {})}
+                if partial and workflow.weekly_summary.get("first_partial_week_to_only"):
+                    weekly_email.update(cc=[], bcc=[])
+                recipient_workflow = replace(workflow, email=weekly_email)
                 last_checkpoint = int(artifacts[-1]["checkpoint_after"])
                 window_starts = [a["window_start"] for a in artifacts if a["window_start"]]
                 window_ends = [a["window_end"] for a in artifacts if a["window_end"]]

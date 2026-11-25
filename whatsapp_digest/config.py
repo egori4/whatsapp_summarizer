@@ -495,6 +495,13 @@ def load_config(path: str | Path) -> AppConfig:
         to = _validate_emails(workflow_email.get("to"), f"{prefix}.delivery.email.to", required=True)
         cc = _validate_emails(workflow_email.get("cc", []), f"{prefix}.delivery.email.cc", required=False)
         bcc = _validate_emails(workflow_email.get("bcc", []), f"{prefix}.delivery.email.bcc", required=False)
+        weekly_email_raw = _mapping(weekly_raw.get("email", {}), f"{prefix}.weekly_summary.email")
+        if set(weekly_email_raw) - {"to", "cc", "bcc"}:
+            raise ConfigError(f"{prefix}.weekly_summary.email supports only to, cc, bcc")
+        weekly_email = {
+            key: _validate_emails(value, f"{prefix}.weekly_summary.email.{key}", required=key == "to")
+            for key, value in weekly_email_raw.items()
+        }
         attach_raw = workflow_email.get("attach_raw_messages", True)
         if not isinstance(attach_raw, bool):
             raise ConfigError(f"{prefix}.delivery.email.attach_raw_messages must be boolean")
@@ -518,6 +525,7 @@ def load_config(path: str | Path) -> AppConfig:
                 "evidence_mode": evidence_mode,
                 "first_partial_week": first_partial_week,
                 "first_partial_week_to_only": first_partial_week_to_only,
+                "email": weekly_email,
             },
         ))
 

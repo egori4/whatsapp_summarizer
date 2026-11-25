@@ -73,6 +73,8 @@ workflows:
       # Optional first partial pilot if enabled mid-week:
       # first_partial_week: "2026-11-02"  # sends Nov 9 at 08:30
       # first_partial_week_to_only: true  # no CC/BCC on partial only
+      # email:  # optional weekly-only overrides; omitted lists inherit daily
+      #   bcc: [weekly-reader@example.com]
       schedule:
         type: weekly
         days: [mon]

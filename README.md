@@ -247,7 +247,7 @@ history is backfilled for November 2-4.
 The November 9 email will say PARTIAL in the subject and body, and its metadata
 will show the first actual saved digest date. The To-only option suppresses
 CC/BCC for this one partial pilot, including its failure notice. Daily BCC and
-later complete weekly emails retain the original configured recipients.
+later complete weekly emails retain the configured weekly recipients. By default weekly recipients inherit daily To/Cc/Bcc. Set individual lists under `weekly_summary.email` (for example `bcc: [weekly-reader@example.com]`) to override only weekly delivery; omitted lists inherit the daily values.
 
 From November 16, the selector again requires the normal predecessor anchor.
 The special setting can be removed after the first pilot; normal weekly
