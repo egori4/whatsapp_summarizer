@@ -31,9 +31,9 @@ PRODUCT_TITLES = {
 }
 STATUS_LABELS = {
     "confirmed": "Confirmed",
-    "proposed": "Proposed solution - not confirmed",
+    "proposed": "Suggested approach",
     "partial": "Partially answered",
-    "unanswered": "No answer found",
+    "unanswered": "Unanswered",
 }
 HISTORY_DAYS = 3
 
@@ -47,17 +47,23 @@ unanswered questions and replies across days. Prefer original messages over summ
 Merge related conversations; keep the latest supported status; do not duplicate a topic.
 Separate materially distinct unanswered subquestions only when necessary.
 Report exactly two possible top-level sections: resolved and unresolved.
-- resolved: a concrete confirmed technical fix, authoritative answer, verified limitation,
-  or confirmed useful technical finding. A clearly stated answer can resolve a question
-  without a customer deployment test; distinguish lab results from production outcomes.
-  Include a specific reusable resolution insight and raw message IDs proving the answer/fix.
+- resolved: a concrete technical answer, fix, workaround, verified limitation, or useful
+  technical finding supported by the messages. A clear, applicable answer or specific
+  technical guidance is sufficient to resolve the question; do NOT require the original
+  asker to reply, report a successful test, or confirm deployment. Missing follow-up alone
+  is not grounds for marking an otherwise answered question unresolved. Include the
+  reusable resolution insight and raw message IDs supporting the answer/fix.
+  Do not imply implementation or successful remediation unless reported. Preserve
+  explicit uncertainty and distinguish lab results from production outcomes.
   Add a takeaway only if it adds a distinct, evidence-backed operational implication.
-  A suggestion, silence, ambiguous acknowledgement, or tentative hypothesis is not confirmation. Do not report an issue as resolved if an essential
-  question is still unanswered. Never present a workaround as a permanent fix.
-- unresolved: unanswered important technical questions, unverified proposals, and
-  incomplete troubleshooting. Identify precisely what remains unknown; status is
-  proposed, partial, or unanswered. Use unanswered only when no substantive response
-  to that question is present in the available raw conversation. Do not invent next steps.
+- unresolved: important questions with no answer, an incomplete answer, or genuinely
+  tentative troubleshooting suggestions that do not establish a concrete answer.
+  Use unanswered when no substantive response addresses the question; partial when
+  some useful information answers only part of it; proposed when the available reply
+  is explicitly speculative, inconclusive, or merely suggests an experiment and the
+  underlying technical question remains open. Do NOT use proposed merely because
+  the original asker did not confirm a concrete answer. Identify what is still unknown
+  without inventing next steps or treating lack of acknowledgement as an open question.
 For each issue, use exactly one product ID:
 cyber_controller (CC, CC+, CC X, APSolute Vision, DefenseFlow, MSSP Portal);
 defensepro_dpx (DP, DPX, DefensePro, FlowDetector);
@@ -71,9 +77,9 @@ For each item:
 title: concise technical topic; summary: issue/question and essential context (1 short sentence,
 2 only if necessary). Do not repeat the resolution in the summary.
 product: one product ID; status: confirmed (resolved), proposed/partial/unanswered (unresolved).
-resolution: concrete verified insight for resolved; empty string for unresolved.
+resolution: concrete source-supported insight for resolved; empty string for unresolved.
 resolution_source_ids: nonempty subset of source_ids for resolved, with at least one
-CURRENT raw message proving the answer; [] for unresolved.
+CURRENT raw message supporting the answer; [] for unresolved.
 takeaway: a concise evidence-backed operational implication for resolved ONLY if it adds
 information not already in the resolution/details/actions, otherwise empty. Empty for unresolved.
 details: at most 2 essential nonredundant facts or evidence-backed proposals, or [].

@@ -100,3 +100,22 @@ cross-day confirmations, partial answers, and unanswered questions.
   checks. Enable hybrid mode in the production configuration only after
   reviewing the comparison. No image analysis in this release.
 
+
+## Reader feedback refinements — November 25, 2026
+
+Retain the two sections and existing detail level. A concrete, applicable technical
+answer resolves a question without a subsequent acknowledgement or deployment test.
+Do not claim a successful implementation or remediation unless reported. Reserve
+`proposed` for genuinely tentative or inconclusive troubleshooting; label it
+Suggested approach, with Unanswered and Partially answered for the other open states.
+Compute resolved/unresolved issue counts from the validated JSON and display them
+below the title in both text and HTML, including zero counts. No new model fields,
+additional production model calls or daily workflow changes.
+
+Validation: all 239 tests passed. The repeated real-data dry run on the same
+41 retained messages found the same five issues (3 resolved, 2 unanswered)
+in 40.0 seconds. A separate synthetic live-model check correctly classified
+all four cases: concrete answer without feedback, partial answer, tentative
+suggestion, and unanswered question. Counts were correct in both cases. A
+revised test preview was accepted by SMTP with only the operator as recipient;
+no CC/BCC or raw attachment. Production settings remain unchanged.

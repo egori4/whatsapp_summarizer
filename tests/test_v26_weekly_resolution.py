@@ -100,7 +100,10 @@ def test_raw_first_includes_messages_omitted_by_daily_ai_and_two_sections(hybrid
     assert [s["section_id"] for s in result.digest["sections"]] == ["resolved", "unresolved"]
     assert result.digest["sections"][0]["items"][0]["resolution_source_ids"] == ["confirmed"]
     assert "Resolved Issues" in result.rendered_text and "Unresolved Issues" in result.rendered_text
-    assert "Resolution:" in result.rendered_text and "Status: No answer found" in result.rendered_text
+    assert "Resolved issues: 1 | Unresolved issues: 1" in result.rendered_text
+    assert "<strong>Resolved issues: 1</strong>" in result.rendered_html
+    assert "<strong>Unresolved issues: 1</strong>" in result.rendered_html
+    assert "Resolution:" in result.rendered_text and "Status: Unanswered" in result.rendered_text
     assert "Raw messages analyzed: 7" in result.rendered_text
     assert "Daily digest hints: 1" in result.rendered_text
     assert "<h3>Alteon / AppWall</h3>" in result.rendered_html
@@ -187,6 +190,7 @@ def test_partial_and_proposed_remain_unresolved(hybrid):
                    reported_by=["Artur"], contributors=["Nicola"]),
     ])), current, history, hybrid.workflow("global-ps"))
     assert [i["status"] for i in result["sections"][0]["items"]] == ["partial", "proposed"]
+    assert [i["status_label"] for i in result["sections"][0]["items"]] == ["Partially answered", "Suggested approach"]
 
 
 def test_hybrid_retention_guard(tmp_path):
@@ -254,3 +258,6 @@ def test_hybrid_zero_raw_messages_and_zero_cards_render_both_sections(hybrid):
     assert model.called == 0
     assert result.message_count == 0
     assert result.rendered_text.count("None identified in the available evidence.") == 2
+    assert "Resolved issues: 0 | Unresolved issues: 0" in result.rendered_text
+    assert "<strong>Resolved issues: 0</strong>" in result.rendered_html
+    assert "<strong>Unresolved issues: 0</strong>" in result.rendered_html

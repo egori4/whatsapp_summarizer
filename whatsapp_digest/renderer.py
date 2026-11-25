@@ -69,11 +69,19 @@ def _visible_sections(digest: dict[str, Any], context: RenderContext) -> list[di
             for key, title in (("resolved", "Resolved Issues"), ("unresolved", "Unresolved Issues"))]
 
 
+def _weekly_issue_counts(sections: list[dict[str, Any]]) -> tuple[int, int]:
+    counts = {section["section_id"]: len(section.get("items") or []) for section in sections}
+    return counts.get("resolved", 0), counts.get("unresolved", 0)
+
+
 def render_text(digest: dict[str, Any], context: RenderContext) -> str:
     heading = (f"{context.workflow_name}: {context.weekly_label or context.weekly_period}"
                if context.weekly_period else f"{context.workflow_name} — {context.generated_at:%Y-%m-%d}")
     lines = [heading]
     sections = _visible_sections(digest, context)
+    if context.weekly_daily_card_count is not None:
+        resolved, unresolved = _weekly_issue_counts(sections)
+        lines.extend(["", f"Resolved issues: {resolved} | Unresolved issues: {unresolved}"])
     if not sections:
         lines.extend(["", "No material updates."])
         lines.extend(["", "---", *_metadata_lines(context)])
@@ -210,6 +218,14 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
         )
 
     body = "".join(section_html) if section_html else "<p><strong>No material updates.</strong></p>"
+    overview = ""
+    if context.weekly_daily_card_count is not None:
+        resolved, unresolved = _weekly_issue_counts(sections)
+        overview = (
+            '<p style="margin:0 0 18px;padding:12px 14px;background:#f4f6f8;border:1px solid #dce1e5;">'
+            f'<strong>Resolved issues: {resolved}</strong>&nbsp;&nbsp;|&nbsp;&nbsp;'
+            f'<strong>Unresolved issues: {unresolved}</strong></p>'
+        )
     heading = (f"{context.workflow_name}: {context.weekly_label or context.weekly_period}"
                if context.weekly_period else f"{context.workflow_name} — {context.generated_at:%Y-%m-%d}")
     return (
@@ -222,7 +238,7 @@ def render_html(digest: dict[str, Any], context: RenderContext) -> str:
         "h2{margin-top:28px;border-bottom:1px solid #ddd;padding-bottom:5px}h3{margin-bottom:5px}"
         "article{margin-bottom:18px}.weekly-topics{padding-left:20px}.weekly-item{margin:0 0 14px}.weekly-item div{margin-bottom:3px}.weekly-detail{color:#444}.takeaway{padding-left:8px}ul{margin-top:4px}.contacts{font-size:13px;color:#555;margin-top:6px}.metadata{margin-top:24px;color:#666;font-size:12px}"
         "</style></head><body>"
-        f"<h2>{escape(heading)}</h2>{body}<div class=\"metadata\"><table>{metadata}</table></div>"
+        f"<h2>{escape(heading)}</h2>{overview}{body}<div class=\"metadata\"><table>{metadata}</table></div>"
         "</body></html>\n"
     )
 

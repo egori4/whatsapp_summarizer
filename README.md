@@ -106,7 +106,10 @@ usable raw messages for the canonical weekly checkpoint range; daily digests
 are topic hints, never proof. An optional three-day historical context is
 best effort. Confirmed fixes, answers and useful technical findings require
 a concrete resolution and current raw evidence; proposed, partial and
-unanswered questions remain unresolved.
+unanswered questions remain unresolved. A concrete technical answer does not need
+follow-up confirmation from the asker. Only explicitly tentative/inconclusive
+responses are labeled Suggested approach; missing feedback alone is not enough.
+The weekly header shows deterministic resolved and unresolved issue counts.
 
 To enable, edit the existing local config (keep every other setting):
 
