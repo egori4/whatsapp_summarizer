@@ -207,7 +207,7 @@ def test_hybrid_delivery_and_ledger_use_existing_semantics(hybrid):
     model = FakeGateway(output([item()], [unresolved()]))
     first = run_weekly(hybrid, "global-ps", now=NOW, gateway=model, delivery=email)
     second = run_weekly(hybrid, "global-ps", now=NOW, gateway=model, delivery=email)
-    assert first.status == "weekly-delivered" and second.status == "already-delivered"
+    assert first.status == "weekly-smtp-accepted" and second.status == "already-delivered"
     assert len(email.sent) == 1 and model.called == 1
     assert email.sent[0][1]["raw_text"] is None
     assert email.sent[0][0].email["bcc"] == ["test-blind@example.com"]

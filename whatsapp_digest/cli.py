@@ -14,6 +14,7 @@ from .delivery.email import EmailDelivery
 from .logging_setup import setup_logging
 from .locking import WorkflowBusyError, workflow_lock
 from .runner import RunnerError, RunResult, run_workflow
+from .resend import resend_daily
 from .weekly import run_weekly, resolve_period, _select_covered, _is_first_partial_week
 from .systemd import (
     ScheduleError,
@@ -57,6 +58,12 @@ def _parser() -> argparse.ArgumentParser:
     email_sub = email.add_subparsers(dest="email_command", required=True)
     email_test = email_sub.add_parser("test")
     email_test.add_argument("workflow", help="Workflow ID")
+
+    resend = sub.add_parser("resend", help="Resubmit a retained daily digest without AI or checkpoint changes")
+    resend.add_argument("run_id", help="Original canonical daily run ID")
+    resend.add_argument("--dry-run", action="store_true", help="Preview metadata without sending")
+    resend.add_argument("--all-recipients", action="store_true", help="Include configured Cc/Bcc (default: To only)")
+    resend.add_argument("--without-raw", action="store_true", help="Send saved summary without reconstructed raw attachment")
 
     run = sub.add_parser("run")
     run.add_argument("workflow", help="Workflow ID")
@@ -150,7 +157,7 @@ def _cmd_status(path: str, workflow_id: str | None = None) -> int:
                 weekly_schedule = workflow.weekly_summary["schedule"]
                 print(f"  Weekly: enabled {weekly_schedule['days'][0]} {weekly_schedule['at']} {weekly_schedule['timezone']}")
                 latest_week = db.last_weekly_report(workflow.id)
-                print(f"  Last weekly delivered: {latest_week['week_start_local_date'] if latest_week else 'none'}")
+                print(f"  Last weekly SMTP accepted: {latest_week['week_start_local_date'] if latest_week else 'none'}")
                 latest_attempt = db.last_weekly_attempt(workflow.id)
                 if latest_attempt:
                     print(f"  Last weekly attempt: {latest_attempt['status']}"
@@ -423,6 +430,17 @@ def main(argv: list[str] | None = None) -> int:
                 args.config, workflow=args.workflow, period=args.period,
                 dry_run=args.dry_run, scheduled=args.scheduled,
             )
+        if args.command == "resend":
+            result = resend_daily(
+                load_config(args.config), args.run_id, dry_run=args.dry_run,
+                all_recipients=args.all_recipients, without_raw=args.without_raw,
+            )
+            print(f"Subject: {result.subject}")
+            print(f"Recipients: {', '.join(result.recipients)}")
+            print(f"Source messages: {result.source_count}; reconstructed context: {result.context_count}")
+            print(f"Raw attachment: {result.raw_included}")
+            print(f"Status: {result.status} (inbox delivery unverified)")
+            return 0
         if args.command == "run":
             return _cmd_run(
                 args.config,

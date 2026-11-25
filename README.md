@@ -973,6 +973,26 @@ This switch is intended only for troubleshooting model formatting/schema problem
 
 ---
 
+## Resend a retained daily digest
+
+Use the original canonical daily run ID (available in the application logs).
+With the normal SMTP environment loaded:
+
+```bash
+digest --config ./config.yaml resend <run-id> --dry-run
+digest --config ./config.yaml resend <run-id>
+```
+
+The resend uses the saved validated summary, does not invoke a model, and does not
+write to the runs, daily/weekly ledgers, or processing checkpoints. It sends to
+configured To recipients only by default; add `--all-recipients` to include Cc/Bcc.
+If configured, the raw attachment is reconstructed from retained source rows and
+marked as reconstructed, not a byte-exact original; historical context may differ.
+If the current source window is incomplete or expired, use `--without-raw` to
+send only the saved summary. Only retained canonical material daily artifacts
+(currently captured for weekly-enabled workflows) are supported; failed original
+runs and weekly reports are not resubmitted by this command.
+
 ## Run statuses
 
 Common statuses:
@@ -983,12 +1003,12 @@ Common statuses:
 | `success-no-pending` | No pending rows; checkpoint/baseline remains successful. |
 | `success-no-usable` | Pending changes existed but none contained usable text/caption. |
 | `success-no-material` | Model/validation succeeded but there was nothing worth emailing. Checkpoint advanced. |
-| `delivered` | SMTP accepted the material digest and checkpoint advanced. |
+| `smtp-accepted` | SMTP accepted the material digest and checkpoint advanced; inbox delivery unverified. |
 | `dry-run-success` | Preview generated successfully; checkpoint unchanged. |
 | `dry-run-no-material-updates` | Valid preview contained no material items; checkpoint unchanged. |
 | `failed` | Model, validation, freshness, rendering, or delivery failed; checkpoint did not advance. |
 
-`delivered` means accepted by the configured SMTP server, not guaranteed inbox delivery.
+Historical `delivered` and `weekly-delivered` records mean SMTP accepted, not confirmed inbox delivery. New runs use `smtp-accepted` and `weekly-smtp-accepted`. The weekly period ledger remains compatible. SMTP logs include a unique Message-ID, the final DATA response (including the relay queue ID if provided), and explicit inbox-delivery-unverified status. No Brevo API delivery confirmation is performed.
 
 There is an unavoidable at-least-once edge case: if SMTP accepts a message and the process crashes before the local success/checkpoint transaction commits, a retry may send a duplicate. The system favors not losing a digest over pretending SMTP provides exactly-once semantics.
 

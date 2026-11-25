@@ -445,7 +445,7 @@ def run_weekly(
                 except Exception as exc:
                     logger.warning("weekly digest retention failed: %s", type(exc).__name__)
                 return RunResult(
-                    run_id, workflow.id, "weekly-delivered", source_count,
+                    run_id, workflow.id, "weekly-smtp-accepted", source_count,
                     last_checkpoint, first_message, last_message,
                     provider=provider, model=model_name, reasoning=reasoning,
                     digest=digest, rendered_text=rendered.text, rendered_html=rendered.html,

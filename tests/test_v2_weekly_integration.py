@@ -73,7 +73,7 @@ def test_daily_real_run_captures_validated_artifact_atomically(tmp_path):
     email=FakeDelivery()
     result=run_workflow(cfg, "global-ps", now=NOW,
                         gateway=DailyGateway(), delivery=email)
-    assert result.status == "delivered"
+    assert result.status == "smtp-accepted"
     assert len(email.sent) == 1
     with DigestDatabase(cfg.database_path) as db:
         artifacts=db._conn.execute("SELECT * FROM daily_digest_artifacts").fetchall()
@@ -113,7 +113,7 @@ def test_daily_disabled_does_not_capture_artifacts(tmp_path):
         daily_message(db)
     r=run_workflow(cfg, "global-ps", now=NOW,
                    gateway=DailyGateway(),delivery=FakeDelivery())
-    assert r.status=="delivered"
+    assert r.status=="smtp-accepted"
     with DigestDatabase(cfg.database_path) as db:
         assert db._conn.execute("SELECT COUNT(*) FROM daily_digest_artifacts").fetchone()[0]==0
 
@@ -138,7 +138,7 @@ def test_daily_explicit_replay_not_canonical(tmp_path):
         daily_message(db)
     r=run_workflow(cfg,"global-ps",last="7d",now=NOW,
                    gateway=DailyGateway(),delivery=FakeDelivery())
-    assert r.status=="delivered"
+    assert r.status=="smtp-accepted"
     with DigestDatabase(cfg.database_path) as db:
         assert db._conn.execute("SELECT COUNT(*) FROM daily_digest_artifacts").fetchone()[0]==0
 
@@ -311,7 +311,7 @@ def test_weekly_smtp_bcc_envelope_not_visible_headers(tmp_path):
     transport=EmailDelivery(cfg,smtp_factory=FakeSMTP)
     result=run_weekly(cfg,"global-ps",now=NOW,
                       gateway=FakeGateway(),delivery=transport)
-    assert result.status=="weekly-delivered"
+    assert result.status=="weekly-smtp-accepted"
     assert len(seen)==1
     message,recipients=seen[0]
     assert recipients==["test-recipient@example.com","test-blind@example.com"]

@@ -354,7 +354,7 @@ class DigestDatabase:
             if existing is None:
                 raise ValueError("unknown run_id")
             # Avoid stale duplicate finalization moving a later checkpoint backwards.
-            if existing["status"] in {"delivered", "success-no-material", "success-no-pending", "success-no-usable"}:
+            if existing["status"] in {"delivered", "smtp-accepted", "success-no-material", "success-no-pending", "success-no-usable"}:
                 return
             if digest_artifact is not None:
                 state = conn.execute("SELECT checkpoint_seq FROM workflow_state WHERE workflow_id=?", (workflow_id,)).fetchone()
@@ -440,7 +440,7 @@ class DigestDatabase:
                  json.dumps(source_run_ids), json.dumps(digest, ensure_ascii=False)),
             )
             conn.execute(
-                """UPDATE runs SET completed_at=?, status='weekly-delivered', provider=?,
+                """UPDATE runs SET completed_at=?, status='weekly-smtp-accepted', provider=?,
                 model=?, reasoning=? WHERE run_id=?""",
                 (_utc_now(), provider, model, reasoning, run_id),
             )
