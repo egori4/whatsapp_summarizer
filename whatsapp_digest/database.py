@@ -460,6 +460,16 @@ class DigestDatabase:
             )
         return removed
 
+    def daily_run_message_count(self, run_id: str) -> int:
+        row = self._conn.execute("SELECT message_count FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise ValueError("missing canonical daily run")
+        return int(row["message_count"])
+
+    def set_run_message_count(self, run_id: str, count: int) -> None:
+        self._conn.execute("UPDATE runs SET message_count=? WHERE run_id=?", (count, run_id))
+        self._conn.commit()
+
     def create_run(self, *, run_id: str, workflow_id: str, mode: str, checkpoint_before: int | None, cutoff_seq: int | None, message_count: int = 0) -> None:
         self._conn.execute(
             """

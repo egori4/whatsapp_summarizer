@@ -1,3 +1,18 @@
+# Current status — November 25, 2026
+
+- v2.5 PR #3 merged as b6517be; production checkout at
+  /home/egori4/scripts/whatsapp-tech-digest is on main, with daily and weekly
+  timers active. Raw retention increased from 7 to 14 days; production
+  recipients were not changed.
+- v2.6 development worktree:
+  /home/egori4/scripts/whatsapp-tech-digest-v260, branch
+  feature/v2.6.0-weekly-resolution-analysis. Hybrid is opt-in; existing
+  configs retain daily_cards until rollout. New example config uses hybrid.
+- See V2_6_WEEKLY_RESOLUTION_ANALYSIS.md for design, validation, sample limits,
+  rollback, and acceptance. No live production deployment yet.
+- The historical Nov 9/Nov 20 notes below are retained for audit; their
+  branch/deployment descriptions are superseded by this section.
+
 ## Weekly product-family terminology and email-format refinement (November 9, 2026)
 - A shared, code-owned Radware glossary (`whatsapp_digest/model/product_glossary.py`) is added to both daily and weekly system prompts: DP/DPX, CC/CC+, Cyber Controller variants, CWAAP, major legacy and cloud families. Grouping must not erase exact variants/limits.
 - Weekly has seven categories: Cyber Controller / Management; DefensePro / DefensePro X; Alteon / AppWall; Cloud Security; Other Products & Services; Cross-product Topics; Team Notes. Empty categories are not rendered. Primary-subject classification avoids duplicate or artificial cross-product topics.

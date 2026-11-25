@@ -66,7 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="Generate and validate without email or checkpoint update")
     run.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
 
-    weekly = sub.add_parser("weekly", help="Consolidate canonical daily digests for one completed week")
+    weekly = sub.add_parser("weekly", help="Analyze one completed week using configured weekly evidence mode")
     weekly.add_argument("workflow", help="Existing parent workflow ID")
     weekly.add_argument("--period", help="Previous Monday local date YYYY-MM-DD")
     weekly.add_argument("--dry-run", action="store_true", help="Validate and render without SMTP/ledger update")

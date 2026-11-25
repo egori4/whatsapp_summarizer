@@ -10,7 +10,8 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 - [Status](#status)
 - [Architecture](#architecture)
-- [Weekly roll-up v2.5](#weekly-roll-up-v25)
+- [Weekly resolution analysis v2.6](#weekly-resolution-analysis-v26)
+- [Weekly roll-up v2.5 (legacy)](#weekly-roll-up-v25)
 - [Safety model](#safety-model)
 - [Prerequisites](#prerequisites)
 - [Initial installation](#initial-installation)
@@ -30,14 +31,14 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.5.0 (deployed pilot on `feature/v2.5.0-weekly-digest`; `main` remains v2.4.0 until merged)
+**Version:** 2.6.0 (feature branch; stable production is v2.5.0 on main until rollout)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
 **WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
 **Delivery:** SMTP email
 
-v2.5 adds an **optional weekly digest of persisted daily summaries**. The v2.5 feature branch is running as a production pilot on `m920q` (daily and Monday 08:30 ET weekly timers). This release tag identifies the validated v2.5.0 code on that branch; merging to `main` and pushing the tag are separate operations. Other workflow behavior is unchanged when the weekly option is disabled.
+v2.5 added optional weekly consolidation of persisted daily summaries and was merged into main on November 25, 2026. Production on `m920q` continues with the same daily and Monday 08:30 ET timers. v2.6 adds opt-in raw-first weekly analysis, leaving daily behavior unchanged. Existing configs without the new option keep v2.5 weekly behavior.
 
 ### v2.5.0 release summary (2026-11-09)
 
@@ -97,9 +98,54 @@ Hermes may continue running its normal gateway for Telegram or other integration
 
 ---
 
+## Weekly resolution analysis v2.6
+
+Use the hybrid mode to produce **Resolved Issues** and **Unresolved Issues**,
+with product families as subheadings. The model independently analyzes all
+usable raw messages for the canonical weekly checkpoint range; daily digests
+are topic hints, never proof. An optional three-day historical context is
+best effort. Confirmed fixes, answers and useful technical findings require
+a concrete resolution and current raw evidence; proposed, partial and
+unanswered questions remain unresolved.
+
+To enable, edit the existing local config (keep every other setting):
+
+```yaml
+retention:
+  processed_raw_days: 14
+  digest_days: 30
+
+workflows:
+  - id: global-ps
+    weekly_summary:
+      enabled: true
+      evidence_mode: hybrid
+      schedule:
+        type: weekly
+        days: [mon]
+        at: "08:30"
+```
+
+`daily_cards` (default for existing configs) retains the v2.5 layout/analysis.
+Set it explicitly to roll back without changing daily behavior or timers.
+Hybrid mode requires at least 14 days of raw retention; raising retention
+cannot restore old purged messages. Current raw counts are reconciled against
+each canonical daily run. Missing, edited-away or deleted evidence causes a
+source failure before AI/digest delivery rather than silent fallback or
+truncation. Historical context is best effort and coverage is of collected,
+usable raw messages, not the entire upstream conversation. An older report
+may be unreplayable. The previous Monday anchor and delivery ledger still apply.
+
+Dry-run on a copy of the database with isolated recipients. The CLI commands
+below work in either mode. No extra weekly model call is required. Keep
+`--dry-run` for historical replay; use a separate, explicitly To-only preview
+if testing SMTP. The original delivery ledger is never rewritten for tests.
+
+See [v2.6 design and acceptance](V2_6_WEEKLY_RESOLUTION_ANALYSIS.md).
+
 ## Weekly roll-up v2.5
 
-Weekly is a **downstream consolidation of the validated daily digests**, not another
+The legacy `daily_cards` mode is a **downstream consolidation of the validated daily digests**, not another
 WhatsApp collector, raw-message replay, group workflow, or checkpoint. Existing
 daily digests are sent as before. When weekly is enabled, every successful,
 checkpoint-driven, real daily completion also saves validated JSON in local SQLite
@@ -207,7 +253,7 @@ operation and idempotent delivery continue.
 ### Weekly commands
 
 ```bash
-# On v2.5 deployment; does not enable a timer by itself:
+# Validate either weekly evidence mode; does not enable a timer by itself:
 digest --config ./config.yaml config validate
 
 # Preview only (never sends mail / moves checkpoint / marks delivered):

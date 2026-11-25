@@ -420,6 +420,11 @@ def load_config(path: str | Path) -> AppConfig:
         weekly_enabled = weekly_raw.get("enabled", False)
         if not isinstance(weekly_enabled, bool):
             raise ConfigError(f"{prefix}.weekly_summary.enabled must be boolean")
+        evidence_mode = weekly_raw.get("evidence_mode", "daily_cards")
+        if evidence_mode not in ("daily_cards", "hybrid"):
+            raise ConfigError(f"{prefix}.weekly_summary.evidence_mode must be daily_cards or hybrid")
+        if weekly_enabled and evidence_mode == "hybrid" and processed_raw_days < 14:
+            raise ConfigError("hybrid weekly analysis requires retention.processed_raw_days >= 14")
         weekly_schedule = None
         first_partial_week = weekly_raw.get("first_partial_week")
         first_partial_week_to_only = weekly_raw.get("first_partial_week_to_only", False)
@@ -510,6 +515,7 @@ def load_config(path: str | Path) -> AppConfig:
             email={"to": to, "cc": cc, "bcc": bcc, "attach_raw_messages": attach_raw, "subject": subject},
             weekly_summary={
                 "enabled": weekly_enabled, "schedule": weekly_schedule,
+                "evidence_mode": evidence_mode,
                 "first_partial_week": first_partial_week,
                 "first_partial_week_to_only": first_partial_week_to_only,
             },
