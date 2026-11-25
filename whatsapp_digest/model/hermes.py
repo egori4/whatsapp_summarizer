@@ -11,11 +11,12 @@ import tempfile
 from typing import Any, Callable
 
 from ..config import AppConfig, WorkflowConfig
+from .product_glossary import RADWARE_PRODUCT_TERMINOLOGY
 
 MAX_PROMPT_CHARS = 160_000
 MAX_OUTPUT_CHARS = 65_536
 
-BASE_SYSTEM_PROMPT = """You are a read-only summarization component.
+BASE_SYSTEM_PROMPT = RADWARE_PRODUCT_TERMINOLOGY + """You are a read-only summarization component.
 
 Create a concise professional digest from the supplied WhatsApp source messages.
 
@@ -244,9 +245,24 @@ class HermesModelGateway:
         ]
         user_prompt, context_records = fit_prompt_context(workflow, records, context_records)
 
+        return self.generate_prompt(
+            workflow, system_prompt=BASE_SYSTEM_PROMPT, user_prompt=user_prompt,
+            source_records=tuple(records), context_source_records=tuple(context_records),
+        )
+
+    def generate_prompt(
+        self, workflow: WorkflowConfig, *, system_prompt: str, user_prompt: str,
+        schema: dict[str, Any] | None = None,
+        source_records: tuple[dict[str, str], ...] = (),
+        context_source_records: tuple[dict[str, str], ...] | None = None,
+    ) -> ModelInvocationResult:
+        if len(user_prompt) > MAX_PROMPT_CHARS:
+            raise HermesGatewayError(
+                f"digest prompt exceeds safe size limit ({len(user_prompt)} > {MAX_PROMPT_CHARS} characters)"
+            )
         request = {
             "model": dict(workflow.model),
-            "system_prompt": BASE_SYSTEM_PROMPT,
+            "system_prompt": system_prompt,
             "user_prompt": user_prompt,
         }
 
@@ -309,6 +325,6 @@ class HermesModelGateway:
                 provider=str(result.get("provider") or "unknown"),
                 model=str(result.get("model") or "unknown"),
                 reasoning=str(result.get("reasoning") or "unknown"),
-                source_records=tuple(records),
-                context_source_records=tuple(context_records),
+                source_records=source_records,
+                context_source_records=context_source_records,
             )

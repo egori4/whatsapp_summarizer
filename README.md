@@ -10,6 +10,7 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 - [Status](#status)
 - [Architecture](#architecture)
+- [Weekly roll-up v2.5](#weekly-roll-up-v25)
 - [Safety model](#safety-model)
 - [Prerequisites](#prerequisites)
 - [Initial installation](#initial-installation)
@@ -29,14 +30,22 @@ It is **not** a conversational WhatsApp bot and it never sends messages back to 
 
 ## Status
 
-**Version:** 2.4.0
+**Version:** 2.5.0 (deployed pilot on `feature/v2.5.0-weekly-digest`; `main` remains v2.4.0 until merged)
 **Runtime:** Linux + systemd user services  
 **Python:** 3.11+  
 **Model gateway:** Hermes  
 **WhatsApp transport:** unmodified Hermes Baileys bridge running standalone on loopback  
 **Delivery:** SMTP email
 
-The implementation is feature-complete for the v2 scope and is in production-pilot/quality-observation mode. The remaining work is operational observation of real digests, not additional architecture.
+v2.5 adds an **optional weekly digest of persisted daily summaries**. The v2.5 feature branch is running as a production pilot on `m920q` (daily and Monday 08:30 ET weekly timers). This release tag identifies the validated v2.5.0 code on that branch; merging to `main` and pushing the tag are separate operations. Other workflow behavior is unchanged when the weekly option is disabled.
+
+### v2.5.0 release summary (2026-11-09)
+
+- Evidence-backed weekly consolidation of successful, validated daily digests, with contiguous checkpoint coverage checks and a one-time explicitly partial first week.
+- Seven broad product/topic headings; shared Radware aliases for daily and weekly prompts; variant-specific claims stay tied to the exact product and version.
+- Compact weekly email bullets with supported takeaways, open questions, follow-ups and contacts; evidence dates remain recorded in the validated data.
+- Weekly-only dry-run rerendering of an already-delivered period without email or modifying the delivery ledger. Daily output, delivery recipients and schedule are unchanged by the formatting improvements.
+- Validation: 212 automated tests passed; November 9 weekly production-data dry run generated successfully without delivery.
 
 ### v2.4 technical clarity and BCC delivery
 
@@ -48,7 +57,7 @@ Workflow emails also support optional `bcc` recipients for digests, failure aler
 
 v2.3 improves cross-digest technical-thread continuity. When a new message continues a previously processed discussion, historical context is used to produce a self-contained update that briefly preserves the original problem/request, important prior state, still-relevant unresolved sub-questions, and the new update. Historical-only material is still not emitted as new content, and every digest item must remain grounded by at least one current message.
 
-For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md).
+For design rationale and security boundaries, see [V2_ARCHITECTURE_SPEC.md](V2_ARCHITECTURE_SPEC.md) and [V2_5_WEEKLY_DIGEST_ARCHITECTURE.md](V2_5_WEEKLY_DIGEST_ARCHITECTURE.md).
 For the current engineering state, decisions, quality evidence, and next steps, see [HANDOFF.md](HANDOFF.md).
 
 > Some older files in this repository describe the previous v1 architecture. For v2 deployment and operations, this README and `V2_ARCHITECTURE_SPEC.md` are authoritative.
@@ -85,6 +94,159 @@ checkpoint
 ```
 
 Hermes may continue running its normal gateway for Telegram or other integrations, but the Hermes gateway's own WhatsApp adapter must remain disabled. This prevents two consumers from competing for the same WhatsApp session/message queue.
+
+---
+
+## Weekly roll-up v2.5
+
+Weekly is a **downstream consolidation of the validated daily digests**, not another
+WhatsApp collector, raw-message replay, group workflow, or checkpoint. Existing
+daily digests are sent as before. When weekly is enabled, every successful,
+checkpoint-driven, real daily completion also saves validated JSON in local SQLite
+(including empty runs), in the **same transaction** as checkpoint completion.
+Failed/dry-run/explicit-window replays are never weekly source artifacts.
+
+### Enablement (only after release and review)
+
+Add to the existing workflow entry in local `config.yaml`:
+
+```yaml
+retention:
+  processed_raw_days: 7
+  log_days: 30
+  digest_days: 30
+
+workflows:
+  - id: global-ps
+    # Keep the existing WhatsApp group ID, daily schedule, model, and email settings.
+    weekly_summary:
+      enabled: true
+      schedule:
+        type: weekly
+        days: [mon]
+        at: "08:30"
+```
+
+The above is a partial configuration illustration; merge these keys into the
+real configuration, **do not replace its other fields**. Weekly requires a daily
+parent schedule, one Monday, the same timezone as the parent, a weekly time
+strictly later than the daily clock, and `digest_days >= 14` (30 by default).
+If absent/disabled, there is no weekly timer and no new digest capture.
+
+The Monday 08:30 local-time boundary selects canonical daily artifacts completed
+in **(previous Monday 08:30, current Monday 08:30]**, plus an earlier
+checkpoint anchor. The **current Monday morning** daily completion must exist,
+and the selected checkpoint chain must be contiguous. Missed intermediate
+daily runs can be covered by a later successful daily catch-up. First weeks without
+the previous-Monday anchor report `insufficient-history` rather than claiming
+complete coverage; a late Monday daily run that missed the cutoff requires
+manual review. This is a *daily-processing window*, **not** an exact calendar
+midnight-to-midnight WhatsApp transcript.
+
+The weekly model receives only saved validated daily cards, deduplicates related
+threads, and distinguishes lab tests, proposals, fixes and unresolved questions.
+Weekly email reports use **seven broad, non-empty categories**:
+Cyber Controller / Management; DefensePro / DefensePro X; Alteon / AppWall;
+Cloud Security; Other Products & Services; Cross-product Topics; and Team Notes.
+These are reporting buckets, not assertions that editions share capabilities.
+For example, CC/CC+/CC X share the management heading and DP/DPX share the
+DefensePro heading, but statements retain the exact edition, model, version,
+licensing, limit and observed status. Cloud security products share one category
+rather than having separate headings per service. Categories with zero items
+are not printed. Classify by the primary subject; use Cross-product only for
+genuinely inseparable multi-family topics.
+
+A single Radware vocabulary in `whatsapp_digest/model/product_glossary.py`
+is included by both daily and weekly system prompts to explain aliases:
+DP = DefensePro, DPX = DefensePro X, CC = Cyber Controller, CC+ =
+Cyber Controller Plus, and CWAAP = Cloud Application Protection Service.
+It also documents related/legacy management and cloud product families.
+The glossary only guides terminology; it is not evidence of product support
+or compatibility, and it must not override facts in the source messages.
+Daily JSON, email formatting and scheduling remain unchanged.
+
+Weekly bullets include a finding, optional nonduplicative details, a supported
+operational takeaway, explicit follow-ups and open questions, and contacts.
+The model's weekly-only `takeaway` field and source-card citations are validated.
+Daily evidence dates and citations remain in stored JSON for audit, but repetitive
+per-item date blocks are omitted from the weekly email. The report retains
+period and coverage metadata. Weekly evidence is still only the persisted
+daily-digest artifacts, not a new WhatsApp collection.
+Weekly subject is `[TechTeam Weekly] Week ending YYYY-MM-DD — NAME`.
+It reuses the parent's To/Cc/Bcc and SMTP credentials, but **never attaches raw
+WhatsApp messages**. The delivery ledger prevents ordinary resends for an
+already-delivered week; SMTP acceptance followed by database failure retains a
+narrow documented duplicate-on-retry risk.
+
+### One-time partial first report on November 9, 2026
+
+The first saved canonical daily reports will be from November 5 onward, so
+the previous Monday's anchor is unavailable. To send a one-time *truthfully
+incomplete* report on November 9, add these keys inside the existing enabled
+weekly_summary block (other keys, including schedule, remain unchanged):
+
+    first_partial_week: "2026-11-02"
+    first_partial_week_to_only: true
+
+The first key is the Monday *start date* of the November 2-9 reporting period.
+Only that exact period can skip the missing predecessor anchor. It selects the
+successful daily digests available before Monday 08:30, and still requires the
+Monday November 9 daily job to have completed. The available saved artifacts
+must form a continuous checkpoint chain; no real or model-inferred WhatsApp
+history is backfilled for November 2-4.
+
+The November 9 email will say PARTIAL in the subject and body, and its metadata
+will show the first actual saved digest date. The To-only option suppresses
+CC/BCC for this one partial pilot, including its failure notice. Daily BCC and
+later complete weekly emails retain the original configured recipients.
+
+From November 16, the selector again requires the normal predecessor anchor.
+The special setting can be removed after the first pilot; normal weekly
+operation and idempotent delivery continue.
+
+### Weekly commands
+
+```bash
+# On v2.5 deployment; does not enable a timer by itself:
+digest --config ./config.yaml config validate
+
+# Preview only (never sends mail / moves checkpoint / marks delivered):
+digest --config ./config.yaml weekly global-ps --dry-run
+digest --config ./config.yaml weekly global-ps --period 2026-11-02 --dry-run
+
+# Show whether an earlier report was delivered and current schedule:
+digest --config ./config.yaml status global-ps
+digest --config ./config.yaml schedule status
+
+# Only after verifying production recipients/coverage:
+digest --config ./config.yaml schedule install
+digest --config ./config.yaml weekly global-ps
+```
+
+An incomplete weekly run is recorded with reason `insufficient-history`,
+`daily-not-complete` or `broken-checkpoint-chain`; the CLI returns nonzero,
+and no email is sent. Invalid output, model errors, and SMTP errors are retryable
+without changing the parent's daily checkpoint. A complete all-empty week gets
+a short "No material updates" email without invoking AI.
+
+`retention.digest_days` (default 30) separately purges sensitive saved daily
+and weekly JSON. The small weekly period-delivery identity is retained after
+content expires, preventing replay by accidental historical reruns. Keep local
+database/dry-run previews private; unlike WhatsApp messages, digest JSON is an
+additional stored copy of synthesized technical knowledge.
+
+**Test safety:** do not run weekly email delivery against the live recipient
+configuration while developing. Use a temporary sanitized configuration,
+an isolated SQLite database, a fake SMTP delivery and/or `--dry-run` with BCC
+empty. An existing BCC recipient is inherited *only after intentionally enabling
+weekly in production*. The new feature has no automatic real-send smoke test.
+
+**Rollback:** set `weekly_summary.enabled: false`, then execute
+`digest --config ./config.yaml schedule install`; only the weekly units
+(`whatsapp-digest-<id>-weekly.service/.timer`) are removed. Daily timer,
+bridge and collector remain. Existing additive SQLite tables need not be
+deleted. See [the implementation plan](V2_5_WEEKLY_DIGEST_IMPLEMENTATION_PLAN.md)
+for the complete DoD and manual rollout gate.
 
 ---
 

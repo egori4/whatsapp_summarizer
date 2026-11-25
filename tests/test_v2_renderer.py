@@ -73,6 +73,26 @@ def test_html_renderer_escapes_model_text():
     assert "&lt;script&gt;" in rendered.html
 
 
+def test_weekly_compact_html_escapes_user_sourced_details_and_remains_distinct_from_daily():
+    from dataclasses import replace
+    ctx = replace(CTX, weekly_period="PARTIAL", weekly_label="Nov 5–9, 2026 (PARTIAL)")
+    data = sample_digest()
+    item = data["sections"][0]["items"][0]
+    item["takeaway"] = "Avoid <script> alerts"
+    item["evidence_dates"] = ["2026-11-06"]
+    weekly = render_digest(data, ctx)
+    daily = render_digest(data, CTX)
+    assert "&lt;script&gt;" in weekly.html
+    assert "<script>" not in weekly.html
+    assert "  Follow-up: Validate stability." in weekly.text
+    assert "  Open: Any known defect ID?" in weekly.text
+    assert "Daily digest dates:" not in weekly.text
+    assert "Daily digest dates" not in weekly.html
+    assert "Daily digest dates:" in daily.text
+    assert "Details:" in daily.text
+    assert "<article>" in daily.html
+
+
 def test_raw_export_uses_exact_supplied_model_records():
     records = (
         {
